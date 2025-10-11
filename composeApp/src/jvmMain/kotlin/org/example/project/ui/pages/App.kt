@@ -1,4 +1,4 @@
-package org.example.project
+package org.example.project.ui.pages
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
@@ -18,6 +18,7 @@ import org.jetbrains.compose.ui.tooling.preview.Preview
 
 import kpz_kanban_lb.composeapp.generated.resources.Res
 import kpz_kanban_lb.composeapp.generated.resources.compose_multiplatform
+import org.example.project.ui.components.Greeting
 
 @Composable
 @Preview

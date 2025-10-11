@@ -1,4 +1,6 @@
-package org.example.project
+package org.example.project.ui.components
+
+import org.example.project.getPlatform
 
 class Greeting {
     private val platform = getPlatform()
