@@ -1,5 +1,6 @@
 package org.example.project.viewmodels
 
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import io.ktor.client.HttpClient
@@ -33,6 +34,16 @@ class DbEditorViewModel(
     private val _isLoading = mutableStateOf(false)
     val isLoading: State<Boolean> = _isLoading
 
+    private val _error: MutableState<String?> = mutableStateOf(null)
+    val error: State<String?> = _error
+
+    fun setError(error: String) {
+        _error.value = error
+    }
+    fun removeError() {
+        _error.value = null
+    }
+
 
     private val _users = mutableStateOf<List<UserDto>>(emptyList())
     val users: State<List<UserDto>> = _users
@@ -52,10 +63,11 @@ class DbEditorViewModel(
                 setBody(userDto)
             }
             if (response.status.isSuccess()) {
-                println("User created successfully. Status: ${response.status.value}")
+                //println("User created successfully. Status: ${response.status.value}")
                 getAllUsers()
             } else {
-                println("Failed to create user. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to create user. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -66,10 +78,11 @@ class DbEditorViewModel(
                 setBody(userDto)
             }
             if (response.status.isSuccess()) {
-                println("User edited successfully. Status: ${response.status.value}")
+                //println("User edited successfully. Status: ${response.status.value}")
                 getAllUsers()
             } else {
-                println("Failed to edit user. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to edit user. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -77,10 +90,11 @@ class DbEditorViewModel(
         viewModelScope.launch {
             val response = client.delete("$baseUrl/api/user/$id")
             if (response.status.isSuccess()) {
-                println("User deleted successfully. Status: ${response.status.value}")
+                //println("User deleted successfully. Status: ${response.status.value}")
                 getAllUsers()
             } else {
-                println("Failed to delete user. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to delete user. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -104,10 +118,11 @@ class DbEditorViewModel(
                 setBody(projectDto)
             }
             if (response.status.isSuccess()) {
-                println("Project created successfully. Status: ${response.status.value}")
+                //println("Project created successfully. Status: ${response.status.value}")
                 getAllProjects()
             } else {
-                println("Failed to create project. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to create project. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -118,10 +133,11 @@ class DbEditorViewModel(
                 setBody(projectDto)
             }
             if (response.status.isSuccess()) {
-                println("Project edited successfully. Status: ${response.status.value}")
+                //println("Project edited successfully. Status: ${response.status.value}")
                 getAllProjects()
             } else {
-                println("Failed to edit project. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to edit project. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -129,10 +145,11 @@ class DbEditorViewModel(
         viewModelScope.launch {
             val response = client.delete("$baseUrl/api/project/$id")
             if (response.status.isSuccess()) {
-                println("Project deleted successfully. Status: ${response.status.value}")
+                //println("Project deleted successfully. Status: ${response.status.value}")
                 getAllProjects()
             } else {
-                println("Failed to delete project. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to delete project. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -156,10 +173,11 @@ class DbEditorViewModel(
                 setBody(projectMemberDto)
             }
             if (response.status.isSuccess()) {
-                println("Project member created successfully. Status: ${response.status.value}")
+                //println("Project member created successfully. Status: ${response.status.value}")
                 getAllProjectMembers()
             } else {
-                println("Failed to create project member. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to create project member. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -170,10 +188,11 @@ class DbEditorViewModel(
                 setBody(projectMemberDto)
             }
             if (response.status.isSuccess()) {
-                println("Project member edited successfully. Status: ${response.status.value}")
+                //println("Project member edited successfully. Status: ${response.status.value}")
                 getAllProjectMembers()
             } else {
-                println("Failed to edit project member. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to edit project member. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -181,10 +200,11 @@ class DbEditorViewModel(
         viewModelScope.launch {
             val response = client.delete("$baseUrl/api/project-member/$id")
             if (response.status.isSuccess()) {
-                println("Project member deleted successfully. Status: ${response.status.value}")
+                //println("Project member deleted successfully. Status: ${response.status.value}")
                 getAllProjectMembers()
             } else {
-                println("Failed to delete project member. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to delete project member. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -208,10 +228,11 @@ class DbEditorViewModel(
                 setBody(kanbanBoardDto)
             }
             if (response.status.isSuccess()) {
-                println("Kanban board created successfully. Status: ${response.status.value}")
+                //println("Kanban board created successfully. Status: ${response.status.value}")
                 getAllKanbanBoards()
             } else {
-                println("Failed to create kanban board. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to create kanban board. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -222,10 +243,11 @@ class DbEditorViewModel(
                 setBody(kanbanBoardDto)
             }
             if (response.status.isSuccess()) {
-                println("Kanban board edited successfully. Status: ${response.status.value}")
+                //println("Kanban board edited successfully. Status: ${response.status.value}")
                 getAllKanbanBoards()
             } else {
-                println("Failed to edit kanban board. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to edit kanban board. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -233,10 +255,11 @@ class DbEditorViewModel(
         viewModelScope.launch {
             val response = client.delete("$baseUrl/api/kanban-board/$id")
             if (response.status.isSuccess()) {
-                println("Kanban board deleted successfully. Status: ${response.status.value}")
+                //println("Kanban board deleted successfully. Status: ${response.status.value}")
                 getAllKanbanBoards()
             } else {
-                println("Failed to delete kanban board. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to delete kanban board. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -260,10 +283,11 @@ class DbEditorViewModel(
                 setBody(kanbanColumnDto)
             }
             if (response.status.isSuccess()) {
-                println("Kanban column created successfully. Status: ${response.status.value}")
+                //println("Kanban column created successfully. Status: ${response.status.value}")
                 getAllKanbanColumns()
             } else {
-                println("Failed to create kanban column. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to create kanban column. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -274,10 +298,11 @@ class DbEditorViewModel(
                 setBody(kanbanColumnDto)
             }
             if (response.status.isSuccess()) {
-                println("Kanban column edited successfully. Status: ${response.status.value}")
+                //println("Kanban column edited successfully. Status: ${response.status.value}")
                 getAllKanbanColumns()
             } else {
-                println("Failed to edit kanban column. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to edit kanban column. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -285,10 +310,11 @@ class DbEditorViewModel(
         viewModelScope.launch {
             val response = client.delete("$baseUrl/api/kanban-column/$id")
             if (response.status.isSuccess()) {
-                println("Kanban column deleted successfully. Status: ${response.status.value}")
+                //println("Kanban column deleted successfully. Status: ${response.status.value}")
                 getAllKanbanColumns()
             } else {
-                println("Failed to delete kanban column. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to delete kanban column. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -312,10 +338,11 @@ class DbEditorViewModel(
                 setBody(kanbanTaskDto)
             }
             if (response.status.isSuccess()) {
-                println("Kanban task created successfully. Status: ${response.status.value}")
+                //println("Kanban task created successfully. Status: ${response.status.value}")
                 getAllKanbanTasks()
             } else {
-                println("Failed to create kanban task. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to create kanban task. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -326,10 +353,11 @@ class DbEditorViewModel(
                 setBody(kanbanTaskDto)
             }
             if (response.status.isSuccess()) {
-                println("Kanban task edited successfully. Status: ${response.status.value}")
+                //println("Kanban task edited successfully. Status: ${response.status.value}")
                 getAllKanbanTasks()
             } else {
-                println("Failed to edit kanban task. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to edit kanban task. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }
@@ -337,10 +365,11 @@ class DbEditorViewModel(
         viewModelScope.launch {
             val response = client.delete("$baseUrl/api/kanban-task/$id")
             if (response.status.isSuccess()) {
-                println("Kanban task deleted successfully. Status: ${response.status.value}")
+                //println("Kanban task deleted successfully. Status: ${response.status.value}")
                 getAllKanbanTasks()
             } else {
-                println("Failed to delete kanban task. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                //println("Failed to delete kanban task. Status: ${response.status.value}, Body: ${response.bodyAsText()}")
+                setError(response.bodyAsText())
             }
         }
     }

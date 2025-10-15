@@ -28,12 +28,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import kotlinx.coroutines.selects.select
+import androidx.compose.ui.window.DialogProperties
 import org.example.project.data.dtos.KanbanBoardDto
 import org.example.project.data.dtos.KanbanColumnDto
 import org.example.project.data.dtos.KanbanTaskDto
@@ -92,6 +94,29 @@ fun DbEditorPage(viewModel: DbEditorViewModel) {
                 tabs[selectedTabIndex].content()
             }
         }
+        val error by viewModel.error
+        if(error != null) {
+            Dialog(
+                onDismissRequest = { viewModel.removeError() },
+            ) {
+                Card {
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            "В ході запиту виникла помилка:",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Red
+                        )
+                        Text(
+                            error.toString(),
+                            fontSize = 16.sp
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -142,8 +167,7 @@ fun DbTable(
     onAdd: (List<String>) -> Unit,
     onEdit: (List<String>) -> Unit,
     onDelete: (Long) -> Unit
-)
-{
+) {
     Column(
         Modifier
             .fillMaxSize()
