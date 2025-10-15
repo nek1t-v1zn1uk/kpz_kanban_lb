@@ -4,27 +4,36 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
 import androidx.compose.material.CircularProgressIndicator
 import androidx.compose.material.Divider
 import androidx.compose.material.DropdownMenu
 import androidx.compose.material.DropdownMenuItem
 import androidx.compose.material.MaterialTheme
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import kotlinx.datetime.toLocalDate
-import kotlinx.serialization.Serializable
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import kotlinx.coroutines.selects.select
 import org.example.project.data.dtos.KanbanBoardDto
 import org.example.project.data.dtos.KanbanColumnDto
 import org.example.project.data.dtos.KanbanTaskDto
@@ -33,15 +42,24 @@ import org.example.project.data.dtos.ProjectDto
 import org.example.project.data.dtos.ProjectMemberDto
 import org.example.project.data.dtos.ProjectMemberRole
 import org.example.project.data.dtos.UserDto
-import org.example.project.utils.LocalDateTimeSerializer
 import org.example.project.viewmodels.DbEditorViewModel
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import kotlin.Long
 import kotlin.String
 
 
 val formatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
+fun DateToString(date: LocalDateTime): String {
+    return date.format(formatter)
+}
+fun StringToDate(string: String): LocalDateTime {
+    return LocalDateTime.parse(string, formatter)
+}
 
 @Composable
 fun DbEditorPage(viewModel: DbEditorViewModel) {
@@ -79,406 +97,557 @@ fun DbEditorPage(viewModel: DbEditorViewModel) {
 
 data class TabInfo(val title: String, val content: @Composable () -> Unit)
 
-data class DbColumns(val columns: List<Map<String, *>>)
-data class DbRows(val rows: List<Map<String, *>>)
+data class DbTableData(val columns: List<DbColumnData>, val rows: List<DbRowData>)
+data class DbColumnData(
+    val name: String,
+    var type: Type,
+    var limitation: Int? = null,
+    var changeable: Boolean = true,
+    var enumOptions: List<String>? = null,
+    var primaryKey: Boolean = false,
+    var foreignKey: Boolean = false,
+) {
+    val formattedName: String
+        get() {
+            var res = ""
+            if(primaryKey)
+                res += "PK "
+            else if(foreignKey)
+                res += "FK "
+            res += "$name - $type"
+            if(type == Type.varchar)
+                res += "($limitation)"
+
+
+            return res
+        }
+    enum class Type{
+        varchar,
+        text,
+        enum,
+        numeric,
+        timestamp
+    }
+}
+
+data class DbRowData(val cells: List<DbCellData>)
+data class DbCellData(
+    var value: String,
+)
 
 @Composable
 fun DbTable(
     title: String,
-    columns: DbColumns,
-    rows: DbRows,
+    tableData: DbTableData,
     onAdd: (List<String>) -> Unit,
     onEdit: (List<String>) -> Unit,
-    onDelete: (Long) -> Unit,
-    content: @Composable () -> Unit)
+    onDelete: (Long) -> Unit
+)
 {
-    val focusManager = LocalFocusManager.current
     Column(
         Modifier
-            .fillMaxWidth()
-            .fillMaxHeight()
+            .fillMaxSize()
             .border(1.dp, Color.Black)
             .padding(16.dp)
     ) {
         // Title
         Text(text = title)
-        // Header
-        Row(
-            horizontalArrangement = Arrangement.SpaceBetween,
+        //Header
+        HeadRow(columns = tableData.columns)
+        //Rows
+        Column(
+            verticalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, Color.Black)
+                .fillMaxSize()
+                .border(2.dp, Color.Black)
         ) {
-            for ((index, column) in columns.columns.withIndex()) {
-                Text(
-                    text = "${column["name"]} (${column["type"]}${if(column["limitation"] != null) "(${column["limitation"]})" else "" })",
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .weight(1f)
-                        .background(if(index%2==0) Color.LightGray else Color.White)
-                        .padding(2.dp)
-                )
+            //View Rows
+            LazyColumn {
+                itemsIndexed(tableData.rows) { index, row ->
+                    DbRow(
+                        tableData.columns,
+                        row.cells,
+                        onEdit,
+                        onDelete
+                    )
+                }
             }
-            Text(
-                text = "ACTIONS",
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .width(200.dp)
-                    .background(Color.Cyan)
-                    .padding(2.dp)
-            )
-        }
-        // Rows
-        Column {
-            for (row in rows.rows) {
-                var isEditing by remember { mutableStateOf(false) }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, Color.Black, RoundedCornerShape(4.dp))
-                        .height(if(isEditing)40.dp else 32.dp)
+            //Add New Row
+            val resetValues: () -> List<String> = {
+                tableData.columns.withIndex().map{ (index, column) ->
+                    if(column.foreignKey || column.type == DbColumnData.Type.enum){
+                        if(column.enumOptions != null && column.enumOptions!!.isNotEmpty())
+                            column.enumOptions!![0]
+                        else
+                            "None"
+                    }
+                    else if(column.type == DbColumnData.Type.varchar) { "" }
+                    else if(column.type == DbColumnData.Type.text) { "" }
+                    else if(column.type == DbColumnData.Type.numeric) { "0" }
+                    else if(column.type == DbColumnData.Type.timestamp) {
+                        DateToString(LocalDateTime.now())
+                    }
+                    else { "" }
+                }
+            }
+            val values = remember { resetValues().toMutableStateList() }
+            Column {
+                Divider(Modifier.height(16.dp))
+                HeadRow(columns = tableData.columns)
+                RowFields(
+                    tableData.columns,
+                    values.map { DbCellData("") },
+                    values
                 ) {
-                    var values = remember { MutableList(row.size) { "" }.toMutableStateList() }
-                    val resetValues = {
-                        for ((index, entry) in row.entries.withIndex()) {
-                            values[index] = entry.value.toString()
-                        }
-                    }
-
-                    for ((index, entry) in row.entries.withIndex()) {
-                        if(isEditing) {
-                            val isEnabled = columns.columns[index]["changeable"] == true || columns.columns[index]["changeable"] == null
-                            if(columns.columns[index]["type"] == "timestamp" && isEnabled) {
-                                if(values[index] == ""){
-                                    values[index] = LocalDateTime.now().format(formatter).replace('T', ' ')
-                                }
-                                var rawDate by remember { mutableStateOf(values[index].filter { it.isDigit() }) }
-                                fun formatDateTime(raw: String): String {
-                                    if (raw.length < 4) return raw
-                                    val year = raw.substring(0, 4)
-                                    if (raw.length < 6) return "$year-${raw.substring(4)}"
-                                    val month = raw.substring(4, 6)
-                                    if (raw.length < 8) return "$year-$month-${raw.substring(6)}"
-                                    val day = raw.substring(6, 8)
-                                    if (raw.length < 10) return "$year-$month-$day ${raw.substring(8)}"
-                                    val hour = raw.substring(8, 10)
-                                    if (raw.length < 12) return "$year-$month-$day $hour:${raw.substring(10)}"
-                                    val minute = raw.substring(10, 12)
-
-                                    return "$year-$month-$day $hour:$minute"
-                                }
-                                BasicTextField(
-                                    value = formatDateTime(rawDate),
-                                    onValueChange = { newValue ->
-                                        val digitsOnly = newValue.filter { it.isDigit() }
-                                        if (digitsOnly.length <= 12) {
-                                            try {
-                                                formatter.parse(formatDateTime(digitsOnly + "000000000000") + ":00")
-                                                values[index] = formatDateTime(digitsOnly + "000000000000") + ":00"
-                                                rawDate = digitsOnly
-                                            } catch (e: Exception) {}
-                                        }
-                                    },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .padding(8.dp)
-                                        .background(Color.White, RoundedCornerShape(8.dp))
-                                        .border(1.dp, Color.Black, RoundedCornerShape(8.dp))
-                                        .padding(8.dp, 2.dp)
-                                )
-                            }
-                            else if(columns.columns[index]["drop-down"] == null) {
-                                BasicTextField(
-                                    value = values[index],
-                                    onValueChange = {
-                                        values[index] = it
-                                    },
-                                    enabled = isEnabled,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .padding(8.dp)
-                                        .background(
-                                            if (isEnabled) Color.White else Color.Gray,
-                                            RoundedCornerShape(8.dp)
-                                        )
-                                        .border(1.dp, Color.Black, RoundedCornerShape(8.dp))
-                                        .padding(8.dp, 2.dp)
-                                )
-                            } else {
-                                var isExpanded by remember { mutableStateOf(false) }
-
-                                Column(
-                                    Modifier
-                                        .padding(8.dp)
-                                        .weight(1f)
-                                        .height(23.dp)
-                                        .border(1.dp, Color.Black, RoundedCornerShape(8.dp))
-                                        .background(Color.LightGray, RoundedCornerShape(8.dp))
-                                ) {
-                                    Text(
-                                        text = values[index],
-                                        modifier = Modifier
-                                            .padding(8.dp, 2.dp)
-                                            .fillMaxSize()
-                                            .clickable {
-                                                isExpanded = !isExpanded
-                                            }
-                                    )
-
-                                    DropdownMenu(
-                                        expanded = isExpanded,
-                                        onDismissRequest = {
-                                            isExpanded = false
-                                        },
-                                    ) {
-                                        (columns.columns[index]["drop-down"] as? List<*>)?.let { optionsList ->
-                                            for (option in optionsList) {
-                                                DropdownMenuItem(
-                                                    onClick = {
-                                                        values[index] = option.toString()
-                                                        isExpanded = false
-                                                    }
-                                                ) {
-                                                    Text(option.toString())
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            Box(
-                                contentAlignment = Alignment.CenterStart,
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .weight(1f)
-                                    .background(if (index % 2 == 0) Color.LightGray else Color.White)
-                            ) {
-                                Text(
-                                    text = if(columns.columns[index]["type"] == "timestamp") entry.value.toString().replace('T', ' ')
-                                    else entry.value.toString(),
-                                    modifier = Modifier
-                                        .padding(2.dp)
-                                )
-                            }
-                        }
-                    }
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .width(200.dp)
-                            .fillMaxHeight()
-                            .background(Color.Cyan)
-                            .padding(2.dp)
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        if(isEditing){
-                            Text(
-                                "SAVE",
-                                modifier = Modifier
-                                    .background(Color.Green, RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        onEdit(values)
-                                        isEditing = false
-                                    }
-                                    .padding(8.dp, 2.dp)
-                            )
-                            Text(
-                                "CANCEL",
-                                modifier = Modifier
-                                    .background(Color.Red, RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        resetValues()
-                                        isEditing = false
-                                    }
-                                    .padding(5.dp, 2.dp)
-
-                            )
-                        } else {
-                            Text(
-                                "EDIT",
-                                modifier = Modifier
-                                    .background(Color.Yellow, RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        isEditing = true
-                                        resetValues()
-                                    }
-                                    .padding(8.dp, 2.dp)
-                            )
-                            Text(
-                                "DEL",
-                                modifier = Modifier
-                                    .background(Color.Red, RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        onDelete(row["id"] as Long)
-                                    }
-                                    .padding(5.dp, 2.dp)
-
-                            )
+                        ActionButton("CREATE", Color.Green, Modifier.weight(1f)) {
+                            onAdd(values)
                         }
                     }
                 }
             }
         }
+    }
+}
 
-        Divider(Modifier.weight(1f))
-        Divider(Modifier.padding(16.dp))
-        // Add new
-        Row(
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, Color.Black)
-        ) {
-            var values = remember { MutableList(columns.columns.size) { "" }.toMutableStateList() }
-            for ((index, column) in columns.columns.withIndex()) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .background(if (index % 2 == 0) Color.LightGray else Color.White)
-                ) {
-                    Text(
-                        text = "${column["name"]} (${column["type"]}${if(column["limitation"] != null) "(${column["limitation"]})" else "" })",
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(2.dp)
+@Composable
+fun HeadRow(columns: List<DbColumnData>){
+    Row(
+        Modifier
+            .height(50.dp)
+    ) {
+        for ((index, column) in columns.withIndex()) {
+            DbCell(
+                Modifier
+                    .weight(1f)
+                    .background(
+                        if (index % 2 == 0) Color(0xFFCCCCCC)
+                        else Color(0xFFE7E7E7),
                     )
-                    val isEnabled = column["changeable"] == true || column["changeable"] == null
-                    if(column["type"] == "timestamp" && isEnabled) {
-                        if(values[index] == ""){
-                            values[index] = LocalDateTime.now().format(formatter).replace('T', ' ')
-                        }
-                        var rawDate by remember { mutableStateOf(values[index].filter { it.isDigit() }) }
-                        fun formatDateTime(raw: String): String {
-                            if (raw.length < 4) return raw
-                            val year = raw.substring(0, 4)
-                            if (raw.length < 6) return "$year-${raw.substring(4)}"
-                            val month = raw.substring(4, 6)
-                            if (raw.length < 8) return "$year-$month-${raw.substring(6)}"
-                            val day = raw.substring(6, 8)
-                            if (raw.length < 10) return "$year-$month-$day ${raw.substring(8)}"
-                            val hour = raw.substring(8, 10)
-                            if (raw.length < 12) return "$year-$month-$day $hour:${raw.substring(10)}"
-                            val minute = raw.substring(10, 12)
-
-                            return "$year-$month-$day $hour:$minute"
-                        }
-                        BasicTextField(
-                            value = formatDateTime(rawDate),
-                            onValueChange = { newValue ->
-                                val digitsOnly = newValue.filter { it.isDigit() }
-                                if (digitsOnly.length <= 12) {
-                                    try {
-                                        formatter.parse(formatDateTime(digitsOnly + "000000000000") + ":00")
-                                        values[index] = formatDateTime(digitsOnly + "000000000000") + ":00"
-                                        rawDate = digitsOnly
-                                    } catch (e: Exception) {}
-                                }
-                            },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(8.dp)
-                                .background(Color.White, RoundedCornerShape(8.dp))
-                                .border(1.dp, Color.Black, RoundedCornerShape(8.dp))
-                                .padding(8.dp, 2.dp)
-                        )
-                    }
-                    else if(column["drop-down"] == null) {
-                        BasicTextField(
-                            value = values[index],
-                            onValueChange = {
-                                values[index] = it
-                            },
-                            enabled = isEnabled,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(8.dp)
-                                .background(if (isEnabled) Color.White else Color.Gray, RoundedCornerShape(8.dp))
-                                .border(1.dp, Color.Black, RoundedCornerShape(8.dp))
-                                .padding(8.dp, 2.dp)
-                        )
-                    } else {
-                        var isExpanded by remember { mutableStateOf(false) }
-
-                        Column(
-                            Modifier
-                                .padding(8.dp)
-                                .fillMaxWidth()
-                                .height(23.dp)
-                                .border(1.dp, Color.Black, RoundedCornerShape(8.dp))
-                                .background(Color.LightGray, RoundedCornerShape(8.dp))
-                        ) {
-                            Text(
-                                text = values[index],
-                                modifier = Modifier
-                                    .padding(8.dp, 2.dp)
-                                    .fillMaxSize()
-                                    .clickable {
-                                        isExpanded = !isExpanded
-                                    }
-                            )
-
-                            DropdownMenu(
-                                expanded = isExpanded,
-                                onDismissRequest = {
-                                    isExpanded = false
-                                },
-                            ) {
-                                (column["drop-down"] as? List<*>)?.let { optionsList ->
-                                    for (option in optionsList) {
-                                        DropdownMenuItem(
-                                            onClick = {
-                                                values[index] = option.toString()
-                                                isExpanded = false
-                                            }
-                                        ) {
-                                            Text(option.toString())
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Column(
-                modifier = Modifier
-                    .background(Color.Cyan)
-                    .width(200.dp)
-                    .height(62.dp)
             ) {
-                Text(
-                    text = "ACTIONS",
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .width(200.dp)
-                        .background(Color.Cyan)
-                        .padding(2.dp)
-                )
-                Box(
-                    contentAlignment = Alignment.CenterStart,
-                    modifier = Modifier
-                        .fillMaxHeight()
-                ) {
-                    Text(
-                        "ADD",
-                        modifier = Modifier
-                            .background(Color.Green, RoundedCornerShape(8.dp))
-                            .clickable {
-                                onAdd(values)
-                            }
-                            .padding(5.dp, 2.dp)
+                JustText(column.formattedName, TextAlign.Center)
+            }
+        }
+        DbCell(
+            Modifier
+                .weight(1f)
+                .background(Color.Cyan)
+        ) {
+            JustText("ACTIONS", TextAlign.Center)
+        }
+    }
+}
+@Composable
+fun DbRow(
+    columns: List<DbColumnData>,
+    cells: List<DbCellData>,
+    onEdit: (List<String>) -> Unit,
+    onDelete: (Long) -> Unit
+) {
+    var isEditing by remember { mutableStateOf(false) }
+    if(isEditing){
+        val resetValues: () -> List<String> = {
+            columns.withIndex().map{ (index, column) ->
+                when(column.type){
+                    DbColumnData.Type.varchar -> {
+                        cells[index].value
+                    }
+                    DbColumnData.Type.text -> {
+                        cells[index].value
+                    }
+                    DbColumnData.Type.numeric -> {
+                        cells[index].value
+                    }
+                    DbColumnData.Type.enum -> {
+                        cells[index].value
+                    }
+                    DbColumnData.Type.timestamp -> {
+                        cells[index].value
+                    }
+                }
+            }
+        }
+        var values = remember { resetValues().toMutableStateList() }
+        RowFields(
+            columns,
+            cells,
+            values
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                ActionButton("SAVE", Color.Green, Modifier.weight(1f)) {
+                    isEditing = false
+                    onEdit(values)
+                }
+                ActionButton("CANCEL", Color.Red, Modifier.weight(1f)) {
+                    isEditing = false
+                    values = resetValues().toMutableStateList()
+                }
+            }
+        }
+    } else {
+        RowTexts(
+            cells
+        ){
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                ActionButton("EDIT", Color.Yellow, Modifier.weight(1f)) {
+                    isEditing = true
+                }
+                ActionButton("DELETE", Color.Red, Modifier.weight(1f)) {
+                    val pkIndex = columns.indexOf(columns.find { it.primaryKey })
+                    onDelete(cells[pkIndex].value.toLong())
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RowTexts(
+    cells: List<DbCellData>,
+    buttons: @Composable () -> Unit
+) {
+    Row(
+        Modifier
+            .height(32.dp)
+    ) {
+        for ((index, cell) in cells.withIndex()) {
+            DbCell(
+                Modifier
+                    .weight(1f)
+                    .background(
+                        if (index % 2 == 0) Color(0xFFCCCCCC)
+                        else Color(0xFFE7E7E7),
+                    )
+            ) {
+                JustText(cell.value)
+            }
+        }
+        DbCell(
+            Modifier
+                .weight(1f)
+                .background(Color.Cyan)
+        ) {
+            buttons()
+        }
+    }
+}
+@Composable
+fun RowFields(
+    columns: List<DbColumnData>,
+    cells: List<DbCellData>,
+    values: SnapshotStateList<String>,
+    buttons: @Composable () -> Unit
+) {
+    Row(
+        Modifier
+            .height(40.dp)
+    ) {
+        for ((index, cell) in cells.withIndex()) {
+            DbCell(
+                Modifier
+                    .weight(1f)
+                    .background(
+                        if (index % 2 == 0) Color(0xFFCCCCCC)
+                        else Color(0xFFE7E7E7),
+                    )
+            ) {
+                if(columns[index].foreignKey || columns[index].type == DbColumnData.Type.enum){
+                    MyDropDown(
+                        columns[index].enumOptions!!,
+                        values[index],
+                        { newValue ->
+                            values[index] = newValue
+                        }
+                    )
+                }
+                else if(columns[index].type == DbColumnData.Type.varchar){
+                    MyTextField(
+                        values[index],
+                        { newValue ->
+                            values[index] = newValue
+                        },
+                        maxLength = columns[index].limitation,
+                        enabled = columns[index].changeable
+                    )
+                }
+                else if(columns[index].type == DbColumnData.Type.text){
+                    MyTextField(
+                        values[index],
+                        { newValue ->
+                            values[index] = newValue
+                        },
+                        enabled = columns[index].changeable
+                    )
+                }
+                else if(columns[index].type == DbColumnData.Type.numeric){
+                    MyTextField(
+                        values[index],
+                        { newValue ->
+                            values[index] = newValue
+                        },
+                        isNumeric = true,
+                        enabled = columns[index].changeable
+                    )
+                }
+                else if(columns[index].type == DbColumnData.Type.timestamp){
+                    MyDateTimePicker(
+                        values[index],
+                        { newValue -> values[index] = DateToString(newValue) },
+                        enabled = columns[index].changeable
                     )
                 }
             }
         }
+        DbCell(
+            Modifier
+                .weight(1f)
+                .background(Color.Cyan)
+        ) {
+            buttons()
+        }
+    }
+}
 
+@Composable
+fun DbCell(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier
+            .fillMaxHeight()
+            .border(1.dp, Color.Black)
+            .padding(8.dp, 0.dp)
+    ) {
         content()
     }
 }
+
+@Composable
+fun JustText(
+    text: String,
+    textAlign: TextAlign = TextAlign.Left
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 8.dp, vertical = 0.dp)
+    ) {
+        Text(
+            text = text,
+            textAlign = textAlign,
+            fontSize = 16.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+        )
+    }
+}
+@Composable
+fun ActionButton(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    action: () -> Unit
+){
+    Button(
+        colors = ButtonDefaults.buttonColors(
+            contentColor = Color.Black,
+            containerColor = color
+        ),
+        contentPadding = PaddingValues(0.dp),
+        onClick = action,
+        modifier = modifier
+    ) {
+        Text(text)
+    }
+}
+@Composable
+fun MyTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    isNumeric: Boolean = false,
+    maxLength: Int? = null,
+    enabled: Boolean = true,
+) {
+    var textFieldValue by remember { mutableStateOf(TextFieldValue(text = value)) }
+    BasicTextField(
+        value = textFieldValue,
+        onValueChange = { originNewValue ->
+            var newTextValue = originNewValue.text
+            var newCursorIndex = originNewValue.selection.start
+            if(maxLength == null || newTextValue.length <= maxLength)
+                if(isNumeric) {
+                    val filteredTextValue = newTextValue.filter { it.isDigit() }
+                    newCursorIndex -= newTextValue.length - filteredTextValue.length //зменшити позицію на к-сть НЕ-цифр
+                    newTextValue = filteredTextValue
+                }
+
+            textFieldValue = TextFieldValue(
+                text = newTextValue,
+                selection = TextRange(newCursorIndex)
+            )
+            onValueChange(textFieldValue.text)
+        },
+        textStyle = TextStyle(color = Color.Black, fontSize = 16.sp),
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(0.dp, 4.dp)
+            .wrapContentHeight(Alignment.CenterVertically)
+            .background(
+                if(enabled) Color.White
+                else Color(0xFFAAAAAA),
+                RoundedCornerShape(8.dp))
+            .border(1.dp, Color.Black, RoundedCornerShape(8.dp))
+            .padding(8.dp, 2.dp)
+    )
+}
+@Composable
+fun MyDropDown(
+    options: List<String>,
+    value: String,
+    onValueChange: (String) -> Unit
+){
+    var isExpanded by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .padding(0.dp, 6.dp)
+            .background(Color.LightGray, RoundedCornerShape(8.dp))
+            .border(1.dp, Color.Black, RoundedCornerShape(8.dp))
+    ) {
+        Text(
+            text = value,
+            fontSize = 16.sp,
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable {
+                    isExpanded = !isExpanded
+                }
+                .wrapContentHeight(Alignment.CenterVertically)
+                .padding(8.dp, 2.dp)
+        )
+
+        DropdownMenu(
+            expanded = isExpanded,
+            onDismissRequest = {
+                isExpanded = false
+            },
+        ) {
+            for (option in options) {
+                DropdownMenuItem(
+                    onClick = {
+                        onValueChange(option)
+                        isExpanded = false
+                    }
+                ) {
+                    Text(option)
+                }
+            }
+        }
+    }
+}
+@Composable
+fun MyDateTimePicker(
+    stringDate: String,
+    onValueChange: (LocalDateTime) -> Unit,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    var currentDateTime by remember { mutableStateOf(StringToDate(stringDate)) }
+
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    var tempDate by remember { mutableStateOf<LocalDate?>(null) }
+
+    OutlinedButton(
+        onClick = { showDatePicker = true },
+        colors = ButtonDefaults.buttonColors(
+            containerColor =
+                if(enabled) Color.White
+                else Color(0xFFAAAAAA),
+            contentColor = Color.Black,
+        ),
+        contentPadding = PaddingValues(0.dp),
+        enabled = enabled,
+        modifier = modifier
+            .padding(0.dp, 2.dp)
+            .fillMaxSize()
+            .wrapContentHeight(Alignment.CenterVertically)
+    ) {
+        Text(
+            DateToString(currentDateTime),
+            fontSize = 16.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+        )
+    }
+
+    if (showDatePicker) {
+        var dateString by remember { mutableStateOf(DateToString(currentDateTime).substring(0, 10)) }
+        var isError by remember { mutableStateOf(false) }
+
+        Dialog(onDismissRequest = { showDatePicker = false }) {
+            Card(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Введіть Дату (YYYY-MM-DD)")
+                    OutlinedTextField(value = dateString, onValueChange = { dateString = it; isError = false }, isError = isError)
+
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = {
+                        try {
+                            tempDate = LocalDate.parse(dateString)
+                            showDatePicker = false
+                            showTimePicker = true
+                        } catch (e: DateTimeParseException) {
+                            isError = true
+                        }
+                    }) { Text("Далі (Час)") }
+                }
+            }
+        }
+    }
+
+    if (showTimePicker) {
+        var timeString by remember { mutableStateOf(DateToString(currentDateTime).substring(11, 16)) }
+        var isError by remember { mutableStateOf(false) }
+
+        Dialog(onDismissRequest = { showTimePicker = false }) {
+            Card(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Введіть Час (HH:MM)")
+                    OutlinedTextField(value = timeString, onValueChange = { timeString = it; isError = false }, isError = isError)
+
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = {
+                        try {
+                            val time = LocalTime.parse(timeString, DateTimeFormatter.ofPattern("HH:mm"))
+                            val newDateTime = tempDate!!.atTime(time)
+
+                            currentDateTime = newDateTime
+                            onValueChange(newDateTime)
+                            showTimePicker = false
+
+                            tempDate = null
+                        } catch (e: Exception) {
+                            isError = true
+                        }
+                    }) { Text("Підтвердити") }
+                }
+            }
+        }
+    }
+
+}
+
 
 @Composable
 fun usersTab(viewModel: DbEditorViewModel) {
@@ -492,61 +661,179 @@ fun usersTab(viewModel: DbEditorViewModel) {
     if (isLoading) {
         CircularProgressIndicator()
     } else {
-        val rows = mutableListOf<Map<String, *>>()
-        for(user in users) {
-            rows.add(mapOf(
-                "id" to user.id,
-                "username" to user.username,
-                "email" to user.email,
-                "password_hash" to user.passwordHash
-            ))
-        }
-
         DbTable(
             "Користувачі",
-            DbColumns(
+            DbTableData(
                 listOf(
-                    mapOf(
-                        "name" to "id",
-                        "type" to "int",
-                        "changeable" to false,
+                    DbColumnData(
+                        "id",
+                        DbColumnData.Type.numeric,
+                        changeable = false,
+                        primaryKey = true
                     ),
-                    mapOf(
-                        "name" to "username",
-                        "type" to "varchar",
-                        "limitation" to "32",
+                    DbColumnData(
+                        "username",
+                        DbColumnData.Type.varchar,
+                        32
                     ),
-                    mapOf(
-                        "name" to "email",
-                        "type" to "text"
+                    DbColumnData(
+                        "email",
+                        DbColumnData.Type.text
                     ),
-                    mapOf(
-                        "name" to "password_hash",
-                        "type" to "text"
-                    ),
+                    DbColumnData(
+                        "password_hash",
+                        DbColumnData.Type.text
+                    )
                 ),
+                users.map {
+                    DbRowData(
+                        listOf(
+                            DbCellData(
+                                it.id.toString()
+                            ),
+                            DbCellData(
+                                it.username.toString()
+                            ),
+                            DbCellData(
+                                it.email
+                            ),
+                            DbCellData(
+                                it.passwordHash
+                            )
+                        )
+                    )
+                }
             ),
-            DbRows(rows),
             onAdd = { values: List<String> ->
-                viewModel.addUser(UserDto(
-                    id = null,
-                    username = values[1],
-                    email = values[2],
-                    passwordHash = values[3]
-                ))
+                viewModel.addUser(
+                    UserDto(
+                        id = null,
+                        username = values[1],
+                        email = values[2],
+                        passwordHash = values[3]
+                    )
+                )
             },
             onEdit = { values: List<String> ->
-                viewModel.editUser(UserDto(
-                    id = values[0].toLong(),
-                    username = values[1],
-                    email = values[2],
-                    passwordHash = values[3]
-                ))
+                viewModel.editUser(
+                    UserDto(
+                        id = values[0].toLong(),
+                        username = values[1],
+                        email = values[2],
+                        passwordHash = values[3]
+                    )
+                )
             },
-            onDelete = { id ->
+            onDelete = { id: Long ->
                 viewModel.deleteUser(id)
-            }
-        ) { }
+            },
+        )
+    }
+}
+
+@Composable
+fun projectsTab(viewModel: DbEditorViewModel) {
+    val users by viewModel.users
+    val projects by viewModel.projects
+    val isLoading by viewModel.isLoading
+
+    LaunchedEffect(Unit) {
+        viewModel.getAllUsers()
+        viewModel.getAllProjects()
+    }
+
+    if (isLoading) {
+        CircularProgressIndicator()
+    } else {
+        DbTable(
+            "Проєкти",
+            DbTableData(
+                listOf(
+                    DbColumnData(
+                        "id",
+                        DbColumnData.Type.numeric,
+                        changeable = false,
+                        primaryKey = true
+                    ),
+                    DbColumnData(
+                        "title",
+                        DbColumnData.Type.varchar,
+                        255
+                    ),
+                    DbColumnData(
+                        "description",
+                        DbColumnData.Type.text
+                    ),
+                    DbColumnData(
+                        "created_at",
+                        DbColumnData.Type.timestamp,
+                        changeable = false
+                    ),
+                    DbColumnData(
+                        "updated_at",
+                        DbColumnData.Type.timestamp,
+                        changeable = false
+                    ),
+                    DbColumnData(
+                        "owner_id",
+                        DbColumnData.Type.numeric,
+                        enumOptions = users.map{ it.id.toString() },
+                        foreignKey = true
+                    )
+                ),
+                projects.map {
+                    DbRowData(
+                        listOf(
+                            DbCellData(
+                                it.id.toString()
+                            ),
+                            DbCellData(
+                                it.title
+                            ),
+                            DbCellData(
+                                it.description.toString()
+                            ),
+                            DbCellData(
+                                DateToString(it.createdAt!!)
+                            ),
+                            DbCellData(
+                                DateToString(it.updatedAt!!)
+                            ),
+                            DbCellData(
+                                it.ownerId.toString()
+                            )
+                        )
+                    )
+                }
+            ),
+            onAdd = { values: List<String> ->
+                viewModel.addProject(
+                    ProjectDto(
+                        id = null,
+                        title = values[1],
+                        description = values[2],
+                        createdAt = null,
+                        updatedAt = null,
+                        ownerId = values[5].toLong(),
+                    )
+                )
+            },
+            onEdit = { values: List<String> ->
+                viewModel.editProject(
+                    ProjectDto(
+                        id = values[0].toLong(),
+                        title = values[1],
+                        description = values[2],
+                        createdAt = null,
+                        updatedAt = null,
+                        ownerId = values[5].toLong(),
+                    )
+                )
+            },
+            onDelete = { id: Long ->
+                viewModel.deleteProject(id)
+            },
+        )
     }
 }
 
@@ -566,156 +853,77 @@ fun projectMembersTab(viewModel: DbEditorViewModel) {
     if (isLoading) {
         CircularProgressIndicator()
     } else {
-        val rows = mutableListOf<Map<String, *>>()
-        for(member in projectMembers) {
-            rows.add(mapOf(
-                "id" to member.id,
-                "role" to member.role.toString(),
-                "project_id" to member.projectId,
-                "user_id" to member.userId,
-            ))
-        }
-
         DbTable(
             "Члени проєкту",
-            DbColumns(
+            DbTableData(
                 listOf(
-                    mapOf(
-                        "name" to "id",
-                        "type" to "int",
-                        "changeable" to false,
+                    DbColumnData(
+                        "id",
+                        DbColumnData.Type.numeric,
+                        changeable = false,
+                        primaryKey = true
                     ),
-                    mapOf(
-                        "name" to "role",
-                        "type" to "enum",
-                        "drop-down" to ProjectMemberRole.entries.map { it.name },
+                    DbColumnData(
+                        "role",
+                        DbColumnData.Type.enum,
+                        enumOptions = ProjectMemberRole.entries.map { it.name }
                     ),
-                    mapOf(
-                        "name" to "project_id",
-                        "type" to "int",
-                        "drop-down" to projects.map { it.id },
+                    DbColumnData(
+                        "project_id",
+                        DbColumnData.Type.numeric,
+                        enumOptions = projects.map{ it.id.toString() },
+                        foreignKey = true
                     ),
-                    mapOf(
-                        "name" to "user_id",
-                        "type" to "int",
-                        "drop-down" to users.map { it.id }
+                    DbColumnData(
+                        "user_id",
+                        DbColumnData.Type.numeric,
+                        enumOptions = users.map{ it.id.toString() },
+                        foreignKey = true
                     )
                 ),
+                projectMembers.map {
+                    DbRowData(
+                        listOf(
+                            DbCellData(
+                                it.id.toString()
+                            ),
+                            DbCellData(
+                                it.role.toString()
+                            ),
+                            DbCellData(
+                                it.projectId.toString()
+                            ),
+                            DbCellData(
+                                it.userId.toString()
+                            )
+                        )
+                    )
+                }
             ),
-            DbRows(rows),
             onAdd = { values: List<String> ->
                 viewModel.addProjectMember(
                     ProjectMemberDto(
                         id = null,
                         role = ProjectMemberRole.valueOf(values[1]),
                         projectId = values[2].toLong(),
-                        userId = values[3].toLong(),
+                        userId = values[3].toLong()
                     )
                 )
             },
             onEdit = { values: List<String> ->
-                viewModel.editProjectMember(ProjectMemberDto(
-                    id = values[0].toLong(),
-                    role = ProjectMemberRole.valueOf(values[1]),
-                    projectId = values[2].toLong(),
-                    userId = values[3].toLong(),
-                ))
+                viewModel.editProjectMember(
+                    ProjectMemberDto(
+                        id = values[0].toLong(),
+                        role = ProjectMemberRole.valueOf(values[1]),
+                        projectId = values[2].toLong(),
+                        userId = values[3].toLong()
+                    )
+                )
             },
-            onDelete = { id ->
+            onDelete = { id: Long ->
                 viewModel.deleteProjectMember(id)
-            }
-        ) { }
-    }
-}
-
-@Composable
-fun projectsTab(viewModel: DbEditorViewModel) {
-    val users by viewModel.users
-    val projects by viewModel.projects
-    val isLoading by viewModel.isLoading
-
-    LaunchedEffect(Unit) {
-        viewModel.getAllUsers()
-        viewModel.getAllProjects()
-    }
-
-    if (isLoading) {
-        CircularProgressIndicator()
-    } else {
-        val rows = mutableListOf<Map<String, *>>()
-        for(project in projects) {
-            rows.add(mapOf(
-                "id" to project.id,
-                "title" to project.title,
-                "description" to project.description,
-                "created_at" to project.createdAt?.format(formatter) ,
-                "updated_at" to project.updatedAt?.format(formatter) ,
-                "owner_id" to project.ownerId,
-            ))
-        }
-
-        DbTable(
-            "Проєкти",
-            DbColumns(
-                listOf(
-                    mapOf(
-                        "name" to "id",
-                        "type" to "int",
-                        "changeable" to false,
-                    ),
-                    mapOf(
-                        "name" to "title",
-                        "type" to "varchar",
-                        "limitation" to "255",
-                    ),
-                    mapOf(
-                        "name" to "description",
-                        "type" to "text"
-                    ),
-                    mapOf(
-                        "name" to "created_at",
-                        "type" to "timestamp",
-                        "changeable" to false,
-                    ),
-                    mapOf(
-                        "name" to "updated_at",
-                        "type" to "timestamp",
-                        "changeable" to false,
-                    ),
-                    mapOf(
-                        "name" to "owner_id",
-                        "type" to "int",
-                        "drop-down" to users.map { it.id },
-                    ),
-                ),
-            ),
-            DbRows(rows),
-            onAdd = { values: List<String> ->
-                viewModel.addProject(
-                    ProjectDto(
-                        id = null,
-                        title = values[1],
-                        description = values[2],
-                        createdAt = null,
-                        updatedAt = null,
-                        ownerId = try { values[5].toLong() }catch(e:Exception) { 1 },
-                    )
-                )
             },
-            onEdit = { values: List<String> ->
-                viewModel.editProject(ProjectDto(
-                    id = values[0].toLong(),
-                    title = values[1],
-                    description = values[2],
-                    createdAt = LocalDateTime.parse(values[3], formatter),
-                    updatedAt = LocalDateTime.parse(values[4], formatter),
-                    ownerId = values[5].toLong(),
-                ))
-            },
-            onDelete = { id ->
-                viewModel.deleteProject(id)
-            }
-        ) { }
+        )
     }
 }
 
@@ -733,54 +941,67 @@ fun boardsTab(viewModel: DbEditorViewModel) {
     if (isLoading) {
         CircularProgressIndicator()
     } else {
-        val rows = mutableListOf<Map<String, *>>()
-        for(board in boards) {
-            rows.add(mapOf(
-                "id" to board.id,
-                "title" to board.title,
-                "description" to board.description,
-                "created_at" to board.createdAt?.format(formatter),
-                "updated_at" to board.updatedAt?.format(formatter),
-                "project_id" to board.projectId,
-            ))
-        }
-
         DbTable(
             "Дошки",
-            DbColumns(
+            DbTableData(
                 listOf(
-                    mapOf(
-                        "name" to "id",
-                        "type" to "int",
-                        "changeable" to false,
+                    DbColumnData(
+                        "id",
+                        DbColumnData.Type.numeric,
+                        changeable = false,
+                        primaryKey = true
                     ),
-                    mapOf(
-                        "name" to "title",
-                        "type" to "varchar",
-                        "limitation" to "255",
+                    DbColumnData(
+                        "title",
+                        DbColumnData.Type.varchar,
+                        limitation = 255
                     ),
-                    mapOf(
-                        "name" to "description",
-                        "type" to "text"
+                    DbColumnData(
+                        "description",
+                        DbColumnData.Type.text
                     ),
-                    mapOf(
-                        "name" to "created_at",
-                        "type" to "timestamp",
-                        "changeable" to false,
+                    DbColumnData(
+                        "created_at",
+                        DbColumnData.Type.timestamp,
+                        changeable = false
                     ),
-                    mapOf(
-                        "name" to "updated_at",
-                        "type" to "timestamp",
-                        "changeable" to false,
+                    DbColumnData(
+                        "updated_at",
+                        DbColumnData.Type.timestamp,
+                        changeable = false
                     ),
-                    mapOf(
-                        "name" to "project_id",
-                        "type" to "int",
-                        "drop-down" to projects.map { it.id },
-                    ),
+                    DbColumnData(
+                        "project_id",
+                        DbColumnData.Type.numeric,
+                        enumOptions = projects.map{ it.id.toString() },
+                        foreignKey = true
+                    )
                 ),
+                boards.map {
+                    DbRowData(
+                        listOf(
+                            DbCellData(
+                                it.id.toString()
+                            ),
+                            DbCellData(
+                                it.title
+                            ),
+                            DbCellData(
+                                it.description.toString()
+                            ),
+                            DbCellData(
+                                DateToString(it.createdAt!!)
+                            ),
+                            DbCellData(
+                                DateToString(it.updatedAt!!)
+                            ),
+                            DbCellData(
+                                it.projectId.toString()
+                            )
+                        )
+                    )
+                }
             ),
-            DbRows(rows),
             onAdd = { values: List<String> ->
                 viewModel.addKanbanBoard(
                     KanbanBoardDto(
@@ -803,8 +1024,8 @@ fun boardsTab(viewModel: DbEditorViewModel) {
                         id = values[0].toLong(),
                         title = values[1],
                         description = values[2],
-                        createdAt = LocalDateTime.parse(values[3], formatter),
-                        updatedAt = LocalDateTime.parse(values[4], formatter),
+                        createdAt = null,
+                        updatedAt = null,
                         projectId = values[5].toLong(),
                     )
                 )
@@ -812,7 +1033,7 @@ fun boardsTab(viewModel: DbEditorViewModel) {
             onDelete = { id ->
                 viewModel.deleteKanbanBoard(id)
             }
-        ) { }
+        )
     }
 }
 
@@ -830,54 +1051,67 @@ fun columnsTab(viewModel: DbEditorViewModel) {
     if (isLoading) {
         CircularProgressIndicator()
     } else {
-        val rows = mutableListOf<Map<String, *>>()
-        for(column in columns) {
-            rows.add(mapOf(
-                "id" to column.id,
-                "title" to column.title,
-                "position" to column.position,
-                "created_at" to column.createdAt?.format(formatter),
-                "updated_at" to column.updatedAt?.format(formatter),
-                "board_id" to column.boardId,
-            ))
-        }
-
         DbTable(
             "Стовпці",
-            DbColumns(
+            DbTableData(
                 listOf(
-                    mapOf(
-                        "name" to "id",
-                        "type" to "int",
-                        "changeable" to false,
+                    DbColumnData(
+                        "id",
+                        DbColumnData.Type.numeric,
+                        changeable = false,
+                        primaryKey = true
                     ),
-                    mapOf(
-                        "name" to "title",
-                        "type" to "varchar",
-                        "limitation" to "255",
+                    DbColumnData(
+                        "title",
+                        DbColumnData.Type.varchar,
+                        limitation = 255
                     ),
-                    mapOf(
-                        "name" to "position",
-                        "type" to "int"
+                    DbColumnData(
+                        "position",
+                        DbColumnData.Type.numeric
                     ),
-                    mapOf(
-                        "name" to "created_at",
-                        "type" to "timestamp",
-                        "changeable" to false,
+                    DbColumnData(
+                        "created_at",
+                        DbColumnData.Type.timestamp,
+                        changeable = false
                     ),
-                    mapOf(
-                        "name" to "updated_at",
-                        "type" to "timestamp",
-                        "changeable" to false,
+                    DbColumnData(
+                        "updated_at",
+                        DbColumnData.Type.timestamp,
+                        changeable = false
                     ),
-                    mapOf(
-                        "name" to "board_id",
-                        "type" to "int",
-                        "drop-down" to boards.map { it.id },
-                    ),
+                    DbColumnData(
+                        "board_id",
+                        DbColumnData.Type.numeric,
+                        enumOptions = boards.map{ it.id.toString() },
+                        foreignKey = true
+                    )
                 ),
+                columns.map {
+                    DbRowData(
+                        listOf(
+                            DbCellData(
+                                it.id.toString()
+                            ),
+                            DbCellData(
+                                it.title
+                            ),
+                            DbCellData(
+                                it.position.toString()
+                            ),
+                            DbCellData(
+                                DateToString(it.createdAt!!)
+                            ),
+                            DbCellData(
+                                DateToString(it.updatedAt!!)
+                            ),
+                            DbCellData(
+                                it.boardId.toString()
+                            )
+                        )
+                    )
+                }
             ),
-            DbRows(rows),
             onAdd = { values: List<String> ->
                 viewModel.addKanbanColumn(
                     KanbanColumnDto(
@@ -921,7 +1155,7 @@ fun columnsTab(viewModel: DbEditorViewModel) {
             onDelete = { id ->
                 viewModel.deleteKanbanColumn(id)
             }
-        ) { }
+        )
     }
 }
 
@@ -939,70 +1173,89 @@ fun tasksTab(viewModel: DbEditorViewModel) {
     if (isLoading) {
         CircularProgressIndicator()
     } else {
-        val rows = mutableListOf<Map<String, *>>()
-        for(task in tasks) {
-            rows.add(mapOf(
-                "id" to task.id,
-                "title" to task.title,
-                "description" to task.description,
-                "position" to task.position,
-                "priority" to task.priority,
-                "due_date" to task.dueDate,
-                "created_at" to task.createdAt?.format(formatter),
-                "updated_at" to task.updatedAt?.format(formatter),
-                "column_id" to task.columnId,
-            ))
-        }
-
         DbTable(
             "Завдання",
-            DbColumns(
+            DbTableData(
                 listOf(
-                    mapOf(
-                        "name" to "id",
-                        "type" to "int",
-                        "changeable" to false,
+                    DbColumnData(
+                        "id",
+                        DbColumnData.Type.numeric,
+                        changeable = false,
+                        primaryKey = true
                     ),
-                    mapOf(
-                        "name" to "title",
-                        "type" to "varchar",
-                        "limitation" to "255",
+                    DbColumnData(
+                        "title",
+                        DbColumnData.Type.varchar,
+                        limitation = 255
                     ),
-                    mapOf(
-                        "name" to "description",
-                        "type" to "text"
+                    DbColumnData(
+                        "description",
+                        DbColumnData.Type.text
                     ),
-                    mapOf(
-                        "name" to "position",
-                        "type" to "int"
+                    DbColumnData(
+                        "position",
+                        DbColumnData.Type.numeric
                     ),
-                    mapOf(
-                        "name" to "priority",
-                        "type" to "enum",
-                        "drop-down" to KanbanTaskPriorities.entries.map { it.name },
+                    DbColumnData(
+                        "priority",
+                        DbColumnData.Type.enum,
+                        enumOptions = KanbanTaskPriorities.entries.map { it.name },
                     ),
-                    mapOf(
-                        "name" to "due_date",
-                        "type" to "timestamp",
+                    DbColumnData(
+                        "due_date",
+                        DbColumnData.Type.timestamp
                     ),
-                    mapOf(
-                        "name" to "created_at",
-                        "type" to "timestamp",
-                        "changeable" to false,
+                    DbColumnData(
+                        "created_at",
+                        DbColumnData.Type.timestamp,
+                        changeable = false
                     ),
-                    mapOf(
-                        "name" to "updated_at",
-                        "type" to "timestamp",
-                        "changeable" to false,
+                    DbColumnData(
+                        "updated_at",
+                        DbColumnData.Type.timestamp,
+                        changeable = false
                     ),
-                    mapOf(
-                        "name" to "column_id",
-                        "type" to "int",
-                        "drop-down" to columns.map { it.id },
-                    ),
+                    DbColumnData(
+                        "column_id",
+                        DbColumnData.Type.numeric,
+                        enumOptions = columns.map{ it.id.toString() },
+                        foreignKey = true
+                    )
                 ),
+                tasks.map {
+                    DbRowData(
+                        listOf(
+                            DbCellData(
+                                it.id.toString()
+                            ),
+                            DbCellData(
+                                it.title
+                            ),
+                            DbCellData(
+                                it.description.toString()
+                            ),
+                            DbCellData(
+                                it.position.toString()
+                            ),
+                            DbCellData(
+                                it.priority.toString()
+                            ),
+                            DbCellData(
+                                DateToString(it.dueDate!!)
+                            ),
+                            DbCellData(
+                                DateToString(it.createdAt!!)
+                            ),
+                            DbCellData(
+                                DateToString(it.updatedAt!!)
+                            ),
+                            DbCellData(
+                                it.columnId.toString()
+                            )
+                        )
+                    )
+                }
             ),
-            DbRows(rows),
             onAdd = { values: List<String> ->
                 viewModel.addKanbanTask(
                     KanbanTaskDto(
@@ -1011,7 +1264,7 @@ fun tasksTab(viewModel: DbEditorViewModel) {
                         description = values[2],
                         position = values[3].toInt(),
                         priority = KanbanTaskPriorities.valueOf(values[4]),
-                        dueDate = LocalDateTime.parse(values[5], formatter),
+                        dueDate = StringToDate(values[5]),
                         createdAt = null,
                         updatedAt = null,
                         columnId = try {
@@ -1030,9 +1283,9 @@ fun tasksTab(viewModel: DbEditorViewModel) {
                         description = values[2],
                         position = values[3].toInt(),
                         priority = KanbanTaskPriorities.valueOf(values[4]),
-                        dueDate = LocalDateTime.parse(values[5], formatter),
-                        createdAt = LocalDateTime.parse(values[6], formatter),
-                        updatedAt = LocalDateTime.parse(values[7], formatter),
+                        dueDate = StringToDate(values[5]),
+                        createdAt = null,
+                        updatedAt = null,
                         columnId = values[8].toLong(),
                     )
                 )
@@ -1040,6 +1293,6 @@ fun tasksTab(viewModel: DbEditorViewModel) {
             onDelete = { id ->
                 viewModel.deleteKanbanTask(id)
             }
-        ) { }
+        )
     }
 }
