@@ -1,5 +1,6 @@
 package org.example.project.ui.pages
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.viewmodel.compose.viewModel
 import org.example.project.data.dtos.KanbanBoardDto
 import org.example.project.data.dtos.KanbanColumnDto
 import org.example.project.data.dtos.KanbanTaskDto
@@ -166,7 +168,8 @@ fun DbTable(
     tableData: DbTableData,
     onAdd: (List<String>) -> Unit,
     onEdit: (List<String>) -> Unit,
-    onDelete: (Long) -> Unit
+    onDelete: (Long) -> Unit,
+    resort: (List<Pair<String, Boolean>>) -> Unit
 ) {
     Column(
         Modifier
@@ -175,9 +178,44 @@ fun DbTable(
             .padding(16.dp)
     ) {
         // Title
-        Text(text = title)
+        Text(
+            text = title,
+            fontSize = 32.sp,
+            color = Color.Black,
+            modifier = Modifier
+                .padding(16.dp)
+        )
         //Header
-        HeadRow(columns = tableData.columns)
+        val sortAZ = remember { MutableList(tableData.columns.size) { 0 }.toMutableStateList() }
+        val sortList by remember { mutableStateOf(mutableListOf<Pair<String, Boolean>>()) }
+        HeadRow(
+            columns = tableData.columns,
+            extraFunctions = true,
+            sortAZ,
+            { pair ->
+                for((index, column) in tableData.columns.withIndex()) {
+                    if(column.name == pair.first) {
+                        sortAZ[index] = pair.second
+                        break
+                    }
+                }
+                if(pair.second == 0) {
+                    sortList.removeIf { it.first == pair.first }
+                }
+                else if(pair.second == 1) {
+                    sortList.add(Pair(pair.first, true))
+                }
+                else if(pair.second == 2) {
+                    val i = sortList.indexOfFirst { it.first == pair.first }
+                    if(i == -1)
+                        sortList.add(Pair(pair.first, false))
+                    else
+                        sortList[i] = Pair(pair.first, false)
+                }
+
+                resort(sortList.toList())
+            }
+        )
         //Rows
         Column(
             verticalArrangement = Arrangement.SpaceBetween,
@@ -237,7 +275,12 @@ fun DbTable(
 }
 
 @Composable
-fun HeadRow(columns: List<DbColumnData>){
+fun HeadRow(
+    columns: List<DbColumnData>,
+    extraFunctions: Boolean = false,
+    sortAZ: SnapshotStateList<Int> = emptyList<Int>().toMutableStateList(),
+    resort: (Pair<String, Int>) -> Unit = {}
+) {
     Row(
         Modifier
             .height(50.dp)
@@ -251,7 +294,66 @@ fun HeadRow(columns: List<DbColumnData>){
                         else Color(0xFFE7E7E7),
                     )
             ) {
-                JustText(column.formattedName, TextAlign.Center)
+                if(extraFunctions) {
+                    Row {
+                        JustText(
+                            column.formattedName, TextAlign.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        )
+                        fun String.toCamelCase(): String {
+                            val builder = StringBuilder(length)
+                            var capitalizeNext = false
+
+                            for (char in this) {
+                                if (char == '_') {
+                                    capitalizeNext = true
+                                } else if (capitalizeNext) {
+                                    builder.append(char.uppercaseChar())
+                                    capitalizeNext = false
+                                } else {
+                                    builder.append(char)
+                                }
+                            }
+
+                            return builder.toString()
+                        }
+
+                        Button(
+                            contentPadding = PaddingValues(2.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFBBBBBB),
+                            ),
+                            shape = RoundedCornerShape(5.dp),
+                            border = BorderStroke(1.dp, Color.DarkGray),
+                            onClick = {
+                                sortAZ[index] ++
+                                if(sortAZ[index] == 3)
+                                    sortAZ[index] = 0
+
+                                resort(Pair(column.name.toCamelCase(), sortAZ[index]))
+                            },
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .fillMaxHeight()
+                                .aspectRatio(1f)
+                        ) {
+                            Text(
+                                when (sortAZ[index]) {
+                                    0 -> "="
+                                    1 -> "↑"
+                                    else -> "↓"
+                                },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = Color.Black,
+                            )
+                        }
+                    }
+                } else {
+                    JustText(column.formattedName, TextAlign.Center)
+                }
             }
         }
         DbCell(
@@ -456,12 +558,12 @@ fun DbCell(
 @Composable
 fun JustText(
     text: String,
-    textAlign: TextAlign = TextAlign.Left
+    textAlign: TextAlign = TextAlign.Left,
+    modifier: Modifier = Modifier.fillMaxSize()
 ) {
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .fillMaxSize()
+        modifier = modifier
             .padding(horizontal = 8.dp, vertical = 0.dp)
     ) {
         Text(
@@ -669,7 +771,6 @@ fun MyDateTimePicker(
             }
         }
     }
-
 }
 
 
@@ -751,6 +852,9 @@ fun usersTab(viewModel: DbEditorViewModel) {
             onDelete = { id: Long ->
                 viewModel.deleteUser(id)
             },
+            resort = { sort ->
+                viewModel.resort("users", sort)
+            }
         )
     }
 }
@@ -857,6 +961,9 @@ fun projectsTab(viewModel: DbEditorViewModel) {
             onDelete = { id: Long ->
                 viewModel.deleteProject(id)
             },
+            resort = { sort ->
+                viewModel.resort("projects", sort)
+            }
         )
     }
 }
@@ -947,6 +1054,9 @@ fun projectMembersTab(viewModel: DbEditorViewModel) {
             onDelete = { id: Long ->
                 viewModel.deleteProjectMember(id)
             },
+            resort = { sort ->
+                viewModel.resort("project_members", sort)
+            }
         )
     }
 }
@@ -1056,6 +1166,9 @@ fun boardsTab(viewModel: DbEditorViewModel) {
             },
             onDelete = { id ->
                 viewModel.deleteKanbanBoard(id)
+            },
+            resort = { sort ->
+                viewModel.resort("boards", sort)
             }
         )
     }
@@ -1178,6 +1291,9 @@ fun columnsTab(viewModel: DbEditorViewModel) {
             },
             onDelete = { id ->
                 viewModel.deleteKanbanColumn(id)
+            },
+            resort = { sort ->
+                viewModel.resort("columns", sort)
             }
         )
     }
@@ -1316,6 +1432,9 @@ fun tasksTab(viewModel: DbEditorViewModel) {
             },
             onDelete = { id ->
                 viewModel.deleteKanbanTask(id)
+            },
+            resort = { sort ->
+                viewModel.resort("tasks", sort)
             }
         )
     }

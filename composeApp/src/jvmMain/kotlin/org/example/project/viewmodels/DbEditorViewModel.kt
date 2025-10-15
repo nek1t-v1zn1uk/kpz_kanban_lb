@@ -19,11 +19,20 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.util.reflect.typeInfo
 import kotlinx.coroutines.launch
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.double
+import kotlinx.serialization.serializer
 import org.example.project.data.dtos.KanbanBoardDto
 import org.example.project.data.dtos.KanbanColumnDto
 import org.example.project.data.dtos.KanbanTaskDto
 import org.example.project.data.dtos.ProjectDto
 import org.example.project.data.dtos.ProjectMemberDto
+import kotlin.reflect.KClass
+import kotlin.reflect.full.starProjectedType
 
 class DbEditorViewModel(
     private val client: HttpClient,
@@ -42,6 +51,121 @@ class DbEditorViewModel(
     }
     fun removeError() {
         _error.value = null
+    }
+
+
+    fun resort(table: String, sortAZ: List<Pair<String, Boolean>>) {
+        if(sortAZ.isEmpty())
+            return
+        println(sortAZ)
+        val DTO_CLASSES: Map<String, KClass<*>> = mapOf(
+            "users" to UserDto::class,
+            "projects" to ProjectDto::class,
+            "project_members" to ProjectMemberDto::class,
+            "boards" to KanbanBoardDto::class,
+            "columns" to KanbanColumnDto::class,
+            "tasks" to KanbanTaskDto::class,
+        )
+        val kClass: KClass<*> = DTO_CLASSES[table] ?: throw IllegalArgumentException("Unknown table type")
+        val listToSort = when(table) {
+            "users" -> { _users.value }
+            "projects" -> { _projects.value }
+            "project_members" -> {  _projectMembers.value }
+            "boards" -> { _kanbanBoards.value }
+            "columns" -> { _kanbanColumns.value }
+            "tasks" -> { _kanbanTasks.value }
+            else -> { emptyList() }
+        }
+        val serializer = Json.serializersModule.serializer(kClass.starProjectedType)
+        val jsonStrings = listToSort.map {
+            Json.encodeToString(serializer, it)
+        }
+        val listOfMaps = jsonStrings.map {
+            val jsonObject = Json.decodeFromString<JsonObject>(it)
+            jsonObject.toMap()
+        }
+
+        fun JsonElement.toComparable(): Comparable<*>? {
+            return when (this) {
+                is JsonPrimitive -> {
+                    if (this.isString) {
+                        this.content
+                    } else {
+                        this.double
+                    }
+                }
+                else -> null
+            }
+        }
+
+        val firstSort = sortAZ.first()
+        var comparator: Comparator<Map<String, JsonElement>> = if (firstSort.second) {
+            compareBy { map: Map<String, JsonElement> ->
+                map[firstSort.first]?.toComparable()
+            }
+        } else {
+            compareByDescending { map: Map<String, JsonElement> ->
+                map[firstSort.first]?.toComparable()
+            }
+        }
+
+        for (i in 1 until sortAZ.size) {
+            val (fieldName, isAscending) = sortAZ[i]
+
+            val nextComparator = if (isAscending) {
+                compareBy { map: Map<String, JsonElement> ->
+                    map[fieldName]?.toComparable()
+                }
+            } else {
+                compareByDescending { map: Map<String, JsonElement> ->
+                    map[fieldName]?.toComparable()
+                }
+            }
+
+            comparator = comparator.then(nextComparator)
+        }
+
+        val sortedListOfMaps = listOfMaps.sortedWith(comparator)
+
+        when(table) {
+            "users" -> {
+                _users.value = sortedListOfMaps.map {
+                    val jsonString = Json.encodeToString(it)
+                    Json.decodeFromString<UserDto>(jsonString)
+                }
+            }
+            "projects" -> {
+                _projects.value = sortedListOfMaps.map {
+                    val jsonString = Json.encodeToString(it)
+                    Json.decodeFromString<ProjectDto>(jsonString)
+                }
+            }
+            "project_members" -> {
+                _projectMembers.value = sortedListOfMaps.map {
+                    val jsonString = Json.encodeToString(it)
+                    Json.decodeFromString<ProjectMemberDto>(jsonString)
+                }
+            }
+            "boards" -> {
+                _kanbanBoards.value  = sortedListOfMaps.map {
+                    val jsonString = Json.encodeToString(it)
+                    Json.decodeFromString<KanbanBoardDto>(jsonString)
+                }
+            }
+            "columns" -> {
+                _kanbanColumns.value  = sortedListOfMaps.map {
+                    val jsonString = Json.encodeToString(it)
+                    Json.decodeFromString<KanbanColumnDto>(jsonString)
+                }
+            }
+            "tasks" -> {
+                _kanbanTasks.value = sortedListOfMaps.map {
+                    val jsonString = Json.encodeToString(it)
+                    Json.decodeFromString<KanbanTaskDto>(jsonString)
+                }
+            }
+        }
+
     }
 
 
