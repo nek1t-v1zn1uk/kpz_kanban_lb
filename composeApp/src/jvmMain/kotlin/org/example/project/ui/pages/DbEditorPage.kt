@@ -29,14 +29,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import org.example.project.data.dtos.KanbanBoardDto
 import org.example.project.data.dtos.KanbanColumnDto
 import org.example.project.data.dtos.KanbanTaskDto
@@ -133,10 +131,13 @@ data class DbColumnData(
     var primaryKey: Boolean = false,
     var foreignKey: Boolean = false,
     var sort: MutableState<Sort> = mutableStateOf(Sort.None),
-    var sortPriority: MutableState<Int> = mutableStateOf(0)
+    var sortPriority: MutableState<Int> = mutableStateOf(0),
+    var search: MutableState<String?> = mutableStateOf(null),
+    var searchPriority: MutableState<Int> = mutableStateOf(0),
 ) {
     companion object {
-        private var LastPriority = 0
+        private var LastSortPriority = 0
+        private var LastSearchPriority = 0
     }
     val formattedName: String
         get() {
@@ -152,12 +153,19 @@ data class DbColumnData(
 
             return res
         }
-    fun setPriority() {
-        LastPriority++
-        sortPriority.value = LastPriority
+    fun setSortPriority() {
+        LastSortPriority++
+        sortPriority.value = LastSortPriority
     }
-    fun noPriority() {
+    fun noSortPriority() {
         sortPriority.value = 0
+    }
+    fun setSearchPriority() {
+        LastSearchPriority++
+        searchPriority.value = LastSearchPriority
+    }
+    fun noSearchPriority() {
+        searchPriority.value = 0
     }
     enum class Type{
         varchar,
@@ -203,6 +211,21 @@ fun DbTable(
         //Rows
         val rows = remember {
             derivedStateOf {
+                val searchList = columns.filter {
+                    it.search.value != null
+                }.map {
+                    Triple(it.searchPriority.value, it.search.value, it.name)
+                }.sortedByDescending {
+                    it.first
+                }
+                var searchedList = tableData.rows
+                for (search in searchList) {
+                    val indexOfCell = columns.indexOfFirst { it.name == search.third }
+                    searchedList = searchedList.filter {
+                        it.cells[indexOfCell].value == search.second
+                    }
+                }
+
                 val sortList = columns.filter {
                     it.sort.value != DbColumnData.Sort.None
                 }.map {
@@ -210,8 +233,8 @@ fun DbTable(
                 }.sortedByDescending {
                     it.first
                 }
-                var sortedList = tableData.rows
-                for(sort in sortList){
+                var sortedList = searchedList
+                for(sort in sortList) {
                     val indexOfCell = columns.indexOfFirst { it.name == sort.third }
                     val isNumeric = columns[indexOfCell].type == DbColumnData.Type.numeric
                     sortedList = if(sort.second == DbColumnData.Sort.AZ)
@@ -225,6 +248,7 @@ fun DbTable(
                         else
                             sortedList.sortedByDescending { it.cells[indexOfCell].value }
                 }
+
                 sortedList.toMutableStateList()
             }
         }.value
@@ -326,15 +350,15 @@ fun HeadRow(
                                 onClick = {
                                     column.sort.value = when (column.sort.value) {
                                         DbColumnData.Sort.None -> {
-                                            column.setPriority()
+                                            column.setSortPriority()
                                             DbColumnData.Sort.AZ
                                         }
                                         DbColumnData.Sort.AZ -> {
-                                            column.setPriority()
+                                            column.setSortPriority()
                                             DbColumnData.Sort.ZA
                                         }
                                         DbColumnData.Sort.ZA -> {
-                                            column.noPriority()
+                                            column.noSortPriority()
                                             DbColumnData.Sort.None
                                         }
                                     }
@@ -366,17 +390,31 @@ fun HeadRow(
                         modifier = Modifier
                             .border(1.dp, Color.Black)
                             .padding(16.dp, 4.dp)
+                            .weight(1f)
                     ) {
-                        var isSearch by remember { mutableStateOf(false) }
-                        var isFilter by remember { mutableStateOf(false) }
                         var isSearchDialog by remember { mutableStateOf(false) }
                         var isFilterDialog by remember { mutableStateOf(false) }
 
-                        ActionButton("Пошук", Color(0xFFAAAAAA), modifier = Modifier.weight(1f)) {
-                            isSearchDialog = true
-                        }
-                        ActionButton("Фільтр", Color(0xFFAAAAAA), modifier = Modifier.weight(1f)) {
-                            isSearchDialog = true
+                        if(column.search.value != null) {
+                            JustText("\uD83D\uDD0D ${column.search.value}", modifier = Modifier.weight(1f))
+                            ActionButton(
+                                "X",
+                                Color(0xFFAAAAAA),
+                                modifier = Modifier
+                                    .padding(4.dp)
+                                    .fillMaxHeight()
+                                    .aspectRatio(1f)
+                            ) {
+                                column.search.value = null
+                                column.noSearchPriority()
+                            }
+                        } else {
+                            ActionButton("Пошук", Color(0xFFAAAAAA), modifier = Modifier.weight(1f)) {
+                                isSearchDialog = true
+                            }
+                            ActionButton("Фільтр", Color(0xFFAAAAAA), modifier = Modifier.weight(1f)) {
+                                isSearchDialog = true
+                            }
                         }
 
                         if (isSearchDialog) {
@@ -405,7 +443,7 @@ fun HeadRow(
                                             if (column.type == DbColumnData.Type.timestamp) {
                                                 MyDateTimePicker(
                                                     value,
-                                                    onValueChange = { value = DateToString(it) },
+                                                    { value = DateToString(it) },
                                                 )
                                             } else if (column.foreignKey || column.type == DbColumnData.Type.enum) {
                                                 MyDropDown(
@@ -415,14 +453,17 @@ fun HeadRow(
                                                 )
                                             } else {
                                                 MyTextField(
-                                                    value = value,
-                                                    onValueChange = { value = it },
+                                                    value,
+                                                    { value = it },
                                                     isNumeric = column.type == DbColumnData.Type.numeric,
                                                 )
                                             }
                                         }
                                         Button(
                                             onClick = {
+                                                column.search.value = value
+                                                column.setSearchPriority()
+
                                                 isSearchDialog = false
                                             }
                                         ) {
