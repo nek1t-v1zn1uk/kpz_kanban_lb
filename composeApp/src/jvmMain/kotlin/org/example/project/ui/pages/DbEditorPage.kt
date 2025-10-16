@@ -169,7 +169,7 @@ fun DbTable(
     onAdd: (List<String>) -> Unit,
     onEdit: (List<String>) -> Unit,
     onDelete: (Long) -> Unit,
-    resort: (List<Pair<String, Boolean>>) -> Unit
+    resort: (List<Pair<String, Boolean>>, List<Pair<String, String>>) -> Unit
 ) {
     Column(
         Modifier
@@ -188,6 +188,9 @@ fun DbTable(
         //Header
         val sortAZ = remember { MutableList(tableData.columns.size) { 0 }.toMutableStateList() }
         val sortList by remember { mutableStateOf(mutableListOf<Pair<String, Boolean>>()) }
+
+        val searchList by remember { mutableStateOf(mutableListOf<Pair<String, String>>()) }
+
         HeadRow(
             columns = tableData.columns,
             extraFunctions = true,
@@ -213,7 +216,21 @@ fun DbTable(
                         sortList[i] = Pair(pair.first, false)
                 }
 
-                resort(sortList.toList())
+                resort(sortList.toList(), searchList.toList())
+            },
+            research = { pair ->
+                println("B:")
+                println(searchList)
+                searchList.removeIf { it.first == pair.first }
+
+                if(pair.second != null) {
+                    searchList.add(Pair(pair.first, pair.second.toString()))
+                }
+                println("A:")
+                println(searchList)
+                resort(sortList.toList(), searchList.toList())
+                println("AA:")
+                println(searchList)
             }
         )
         //Rows
@@ -274,19 +291,38 @@ fun DbTable(
     }
 }
 
+fun String.toCamelCase(): String {
+    val builder = StringBuilder(length)
+    var capitalizeNext = false
+
+    for (char in this) {
+        if (char == '_') {
+            capitalizeNext = true
+        } else if (capitalizeNext) {
+            builder.append(char.uppercaseChar())
+            capitalizeNext = false
+        } else {
+            builder.append(char)
+        }
+    }
+
+    return builder.toString()
+}
+
 @Composable
 fun HeadRow(
     columns: List<DbColumnData>,
     extraFunctions: Boolean = false,
     sortAZ: SnapshotStateList<Int> = emptyList<Int>().toMutableStateList(),
-    resort: (Pair<String, Int>) -> Unit = {}
+    resort: (Pair<String, Int>) -> Unit = {},
+    research: (Pair<String, String?>) -> Unit = {}
 ) {
     Row(
         Modifier
-            .height(50.dp)
+            .height(100.dp)
     ) {
         for ((index, column) in columns.withIndex()) {
-            DbCell(
+            Column(
                 Modifier
                     .weight(1f)
                     .background(
@@ -294,65 +330,135 @@ fun HeadRow(
                         else Color(0xFFE7E7E7),
                     )
             ) {
-                if(extraFunctions) {
-                    Row {
-                        JustText(
-                            column.formattedName, TextAlign.Center,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                        )
-                        fun String.toCamelCase(): String {
-                            val builder = StringBuilder(length)
-                            var capitalizeNext = false
+                DbCell(
+                    Modifier
+                        .weight(1f)
+                ) {
+                    if (extraFunctions) {
+                        Row {
+                            JustText(
+                                column.formattedName, TextAlign.Center,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            )
 
-                            for (char in this) {
-                                if (char == '_') {
-                                    capitalizeNext = true
-                                } else if (capitalizeNext) {
-                                    builder.append(char.uppercaseChar())
-                                    capitalizeNext = false
-                                } else {
-                                    builder.append(char)
+                            Button(
+                                contentPadding = PaddingValues(2.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFBBBBBB),
+                                ),
+                                shape = RoundedCornerShape(5.dp),
+                                border = BorderStroke(1.dp, Color.DarkGray),
+                                onClick = {
+                                    sortAZ[index]++
+                                    if (sortAZ[index] == 3)
+                                        sortAZ[index] = 0
+
+                                    resort(Pair(column.name.toCamelCase(), sortAZ[index]))
+                                },
+                                modifier = Modifier
+                                    .padding(4.dp)
+                                    .fillMaxHeight()
+                                    .aspectRatio(1f)
+                            ) {
+                                Text(
+                                    when (sortAZ[index]) {
+                                        0 -> "="
+                                        1 -> "↑"
+                                        else -> "↓"
+                                    },
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = Color.Black,
+                                )
+                            }
+                        }
+                    } else {
+                        JustText(column.formattedName, TextAlign.Center)
+                    }
+                }
+                if(extraFunctions) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier
+                            .border(1.dp, Color.Black)
+                            .padding(16.dp, 4.dp)
+                    ) {
+                        var isSearch by remember { mutableStateOf(false) }
+                        var isFilter by remember { mutableStateOf(false) }
+                        var isSearchDialog by remember { mutableStateOf(false) }
+                        var isFilterDialog by remember { mutableStateOf(false) }
+
+                        ActionButton("Пошук", Color(0xFFAAAAAA), modifier = Modifier.weight(1f)) {
+                            isSearchDialog = true
+                        }
+                        ActionButton("Фільтр", Color(0xFFAAAAAA), modifier = Modifier.weight(1f)) {
+                            isSearchDialog = true
+                        }
+
+                        if (isSearchDialog) {
+                            Dialog(
+                                onDismissRequest = { isSearchDialog = false },
+                            ) {
+                                Card {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Text("Введіть значення для пошуку:")
+                                        var value by remember {
+                                            mutableStateOf(
+                                                if (column.type == DbColumnData.Type.timestamp) DateToString(
+                                                    LocalDateTime.now()
+                                                )
+                                                else if (column.foreignKey || column.type == DbColumnData.Type.enum) column.enumOptions?.let { it[0] }
+                                                    ?: "None"
+                                                else ""
+                                            )
+                                        }
+                                        Box(
+                                            Modifier
+                                                .height(50.dp)
+                                        ) {
+                                            if (column.type == DbColumnData.Type.timestamp) {
+                                                MyDateTimePicker(
+                                                    value,
+                                                    onValueChange = { value = DateToString(it) },
+                                                )
+                                            } else if (column.foreignKey || column.type == DbColumnData.Type.enum) {
+                                                MyDropDown(
+                                                    column.enumOptions!!,
+                                                    value,
+                                                    { value = it }
+                                                )
+                                            } else {
+                                                MyTextField(
+                                                    value = value,
+                                                    onValueChange = { value = it },
+                                                    isNumeric = column.type == DbColumnData.Type.numeric,
+                                                )
+                                            }
+                                        }
+                                        Button(
+                                            onClick = {
+                                                research(Pair(column.name.toCamelCase(), value))
+                                                isSearchDialog = false
+                                            }
+                                        ) {
+                                            Text("Підтвердити")
+                                        }
+                                    }
                                 }
                             }
+                        } else if (isFilterDialog) {
+                            Dialog(
+                                onDismissRequest = { isFilterDialog = false },
+                            ) {
 
-                            return builder.toString()
+                            }
                         }
 
-                        Button(
-                            contentPadding = PaddingValues(2.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFBBBBBB),
-                            ),
-                            shape = RoundedCornerShape(5.dp),
-                            border = BorderStroke(1.dp, Color.DarkGray),
-                            onClick = {
-                                sortAZ[index] ++
-                                if(sortAZ[index] == 3)
-                                    sortAZ[index] = 0
-
-                                resort(Pair(column.name.toCamelCase(), sortAZ[index]))
-                            },
-                            modifier = Modifier
-                                .padding(4.dp)
-                                .fillMaxHeight()
-                                .aspectRatio(1f)
-                        ) {
-                            Text(
-                                when (sortAZ[index]) {
-                                    0 -> "="
-                                    1 -> "↑"
-                                    else -> "↓"
-                                },
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = Color.Black,
-                            )
-                        }
                     }
-                } else {
-                    JustText(column.formattedName, TextAlign.Center)
                 }
             }
         }
@@ -852,8 +958,8 @@ fun usersTab(viewModel: DbEditorViewModel) {
             onDelete = { id: Long ->
                 viewModel.deleteUser(id)
             },
-            resort = { sort ->
-                viewModel.resort("users", sort)
+            resort = { sort, search ->
+                viewModel.resort("users", sort, search)
             }
         )
     }
@@ -961,8 +1067,8 @@ fun projectsTab(viewModel: DbEditorViewModel) {
             onDelete = { id: Long ->
                 viewModel.deleteProject(id)
             },
-            resort = { sort ->
-                viewModel.resort("projects", sort)
+            resort = { sort, search ->
+                viewModel.resort("projects", sort, search)
             }
         )
     }
@@ -1054,8 +1160,8 @@ fun projectMembersTab(viewModel: DbEditorViewModel) {
             onDelete = { id: Long ->
                 viewModel.deleteProjectMember(id)
             },
-            resort = { sort ->
-                viewModel.resort("project_members", sort)
+            resort = { sort, search ->
+                viewModel.resort("project_members", sort, search)
             }
         )
     }
@@ -1167,8 +1273,8 @@ fun boardsTab(viewModel: DbEditorViewModel) {
             onDelete = { id ->
                 viewModel.deleteKanbanBoard(id)
             },
-            resort = { sort ->
-                viewModel.resort("boards", sort)
+            resort = { sort, search ->
+                viewModel.resort("boards", sort, search)
             }
         )
     }
@@ -1292,8 +1398,8 @@ fun columnsTab(viewModel: DbEditorViewModel) {
             onDelete = { id ->
                 viewModel.deleteKanbanColumn(id)
             },
-            resort = { sort ->
-                viewModel.resort("columns", sort)
+            resort = { sort, search ->
+                viewModel.resort("columns", sort, search)
             }
         )
     }
@@ -1433,8 +1539,8 @@ fun tasksTab(viewModel: DbEditorViewModel) {
             onDelete = { id ->
                 viewModel.deleteKanbanTask(id)
             },
-            resort = { sort ->
-                viewModel.resort("tasks", sort)
+            resort = { sort, search ->
+                viewModel.resort("tasks", sort, search)
             }
         )
     }
