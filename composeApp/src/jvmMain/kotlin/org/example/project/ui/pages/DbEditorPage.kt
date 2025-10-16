@@ -1,5 +1,6 @@
 package org.example.project.ui.pages
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -131,7 +132,12 @@ data class DbColumnData(
     var enumOptions: List<String>? = null,
     var primaryKey: Boolean = false,
     var foreignKey: Boolean = false,
+    var sort: MutableState<Sort> = mutableStateOf(Sort.None),
+    var sortPriority: MutableState<Int> = mutableStateOf(0)
 ) {
+    companion object {
+        private var LastPriority = 0
+    }
     val formattedName: String
         get() {
             var res = ""
@@ -146,12 +152,24 @@ data class DbColumnData(
 
             return res
         }
+    fun setPriority() {
+        LastPriority++
+        sortPriority.value = LastPriority
+    }
+    fun noPriority() {
+        sortPriority.value = 0
+    }
     enum class Type{
         varchar,
         text,
         enum,
         numeric,
         timestamp
+    }
+    enum class Sort {
+        None,
+        AZ,
+        ZA
     }
 }
 
@@ -177,8 +195,39 @@ fun DbTable(
         // Title
         Text(text = title)
         //Header
-        HeadRow(columns = tableData.columns)
+        val columns = remember { tableData.columns.toMutableStateList() }
+        HeadRow(
+            columns = columns,
+            extraFunctions = true
+        )
         //Rows
+        val rows = remember {
+            derivedStateOf {
+                val sortList = columns.filter {
+                    it.sort.value != DbColumnData.Sort.None
+                }.map {
+                    Triple(it.sortPriority.value, it.sort.value, it.name)
+                }.sortedByDescending {
+                    it.first
+                }
+                var sortedList = tableData.rows
+                for(sort in sortList){
+                    val indexOfCell = columns.indexOfFirst { it.name == sort.third }
+                    val isNumeric = columns[indexOfCell].type == DbColumnData.Type.numeric
+                    sortedList = if(sort.second == DbColumnData.Sort.AZ)
+                        if(isNumeric)
+                            sortedList.sortedBy { it.cells[indexOfCell].value.toInt() }
+                        else
+                            sortedList.sortedBy { it.cells[indexOfCell].value }
+                    else
+                        if(isNumeric)
+                            sortedList.sortedByDescending { it.cells[indexOfCell].value.toInt() }
+                        else
+                            sortedList.sortedByDescending { it.cells[indexOfCell].value }
+                }
+                sortedList.toMutableStateList()
+            }
+        }.value
         Column(
             verticalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier
@@ -187,7 +236,7 @@ fun DbTable(
         ) {
             //View Rows
             LazyColumn {
-                itemsIndexed(tableData.rows) { index, row ->
+                itemsIndexed(rows) { index, row ->
                     DbRow(
                         tableData.columns,
                         row.cells,
@@ -217,7 +266,7 @@ fun DbTable(
             val values = remember { resetValues().toMutableStateList() }
             Column {
                 Divider(Modifier.height(16.dp))
-                HeadRow(columns = tableData.columns)
+                HeadRow(columns = columns)
                 RowFields(
                     tableData.columns,
                     values.map { DbCellData("") },
@@ -237,13 +286,16 @@ fun DbTable(
 }
 
 @Composable
-fun HeadRow(columns: List<DbColumnData>){
+fun HeadRow(
+    columns: SnapshotStateList<DbColumnData>,
+    extraFunctions: Boolean = false,
+){
     Row(
         Modifier
-            .height(50.dp)
+            .heightIn(50.dp, 100.dp)
     ) {
         for ((index, column) in columns.withIndex()) {
-            DbCell(
+            Column(
                 Modifier
                     .weight(1f)
                     .background(
@@ -251,7 +303,144 @@ fun HeadRow(columns: List<DbColumnData>){
                         else Color(0xFFE7E7E7),
                     )
             ) {
-                JustText(column.formattedName, TextAlign.Center)
+                DbCell(
+                    Modifier
+                        .weight(1f)
+                ) {
+                    if (extraFunctions) {
+                        Row {
+                            JustText(
+                                column.formattedName, TextAlign.Center,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            )
+
+                            Button(
+                                contentPadding = PaddingValues(2.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFBBBBBB),
+                                ),
+                                shape = RoundedCornerShape(5.dp),
+                                border = BorderStroke(1.dp, Color.DarkGray),
+                                onClick = {
+                                    column.sort.value = when (column.sort.value) {
+                                        DbColumnData.Sort.None -> {
+                                            column.setPriority()
+                                            DbColumnData.Sort.AZ
+                                        }
+                                        DbColumnData.Sort.AZ -> {
+                                            column.setPriority()
+                                            DbColumnData.Sort.ZA
+                                        }
+                                        DbColumnData.Sort.ZA -> {
+                                            column.noPriority()
+                                            DbColumnData.Sort.None
+                                        }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .padding(4.dp)
+                                    .fillMaxHeight()
+                                    .aspectRatio(1f)
+                            ) {
+                                Text(
+                                    when (column.sort.value) {
+                                        DbColumnData.Sort.None -> "="
+                                        DbColumnData.Sort.AZ -> "↓"
+                                        DbColumnData.Sort.ZA -> "↑"
+                                    },
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = Color.Black,
+                                )
+                            }
+                        }
+                    } else {
+                        JustText(column.formattedName, TextAlign.Center)
+                    }
+                }
+                if(extraFunctions) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier
+                            .border(1.dp, Color.Black)
+                            .padding(16.dp, 4.dp)
+                    ) {
+                        var isSearch by remember { mutableStateOf(false) }
+                        var isFilter by remember { mutableStateOf(false) }
+                        var isSearchDialog by remember { mutableStateOf(false) }
+                        var isFilterDialog by remember { mutableStateOf(false) }
+
+                        ActionButton("Пошук", Color(0xFFAAAAAA), modifier = Modifier.weight(1f)) {
+                            isSearchDialog = true
+                        }
+                        ActionButton("Фільтр", Color(0xFFAAAAAA), modifier = Modifier.weight(1f)) {
+                            isSearchDialog = true
+                        }
+
+                        if (isSearchDialog) {
+                            Dialog(
+                                onDismissRequest = { isSearchDialog = false },
+                            ) {
+                                Card {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Text("Введіть значення для пошуку:")
+                                        var value by remember {
+                                            mutableStateOf(
+                                                if (column.type == DbColumnData.Type.timestamp) DateToString(
+                                                    LocalDateTime.now()
+                                                )
+                                                else if (column.foreignKey || column.type == DbColumnData.Type.enum) column.enumOptions?.let { it[0] }
+                                                    ?: "None"
+                                                else ""
+                                            )
+                                        }
+                                        Box(
+                                            Modifier
+                                                .height(50.dp)
+                                        ) {
+                                            if (column.type == DbColumnData.Type.timestamp) {
+                                                MyDateTimePicker(
+                                                    value,
+                                                    onValueChange = { value = DateToString(it) },
+                                                )
+                                            } else if (column.foreignKey || column.type == DbColumnData.Type.enum) {
+                                                MyDropDown(
+                                                    column.enumOptions!!,
+                                                    value,
+                                                    { value = it }
+                                                )
+                                            } else {
+                                                MyTextField(
+                                                    value = value,
+                                                    onValueChange = { value = it },
+                                                    isNumeric = column.type == DbColumnData.Type.numeric,
+                                                )
+                                            }
+                                        }
+                                        Button(
+                                            onClick = {
+                                                isSearchDialog = false
+                                            }
+                                        ) {
+                                            Text("Підтвердити")
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (isFilterDialog) {
+                            Dialog(
+                                onDismissRequest = { isFilterDialog = false },
+                            ) {
+
+                            }
+                        }
+
+                    }
+                }
             }
         }
         DbCell(
@@ -456,11 +645,12 @@ fun DbCell(
 @Composable
 fun JustText(
     text: String,
-    textAlign: TextAlign = TextAlign.Left
+    textAlign: TextAlign = TextAlign.Left,
+    modifier: Modifier = Modifier.fillMaxSize()
 ) {
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp, vertical = 0.dp)
     ) {
@@ -538,7 +728,7 @@ fun MyDropDown(
     options: List<String>,
     value: String,
     onValueChange: (String) -> Unit
-){
+) {
     var isExpanded by remember { mutableStateOf(false) }
 
     Column(
