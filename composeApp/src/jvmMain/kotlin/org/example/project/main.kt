@@ -23,6 +23,7 @@ fun main() = application {
                 })
             }
         }
+
         val dbEditorViewModel = DbEditorViewModel(client)
         DbEditorPage(dbEditorViewModel)
     }
