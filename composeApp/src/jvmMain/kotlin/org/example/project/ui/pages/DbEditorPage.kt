@@ -134,10 +134,13 @@ data class DbColumnData(
     var sortPriority: MutableState<Int> = mutableStateOf(0),
     var search: MutableState<String?> = mutableStateOf(null),
     var searchPriority: MutableState<Int> = mutableStateOf(0),
+    var filter: MutableState<Pair<String?, Filter>> = mutableStateOf(Pair(null, Filter.None)),
+    var filterPriority: MutableState<Int> = mutableStateOf(0),
 ) {
     companion object {
         private var LastSortPriority = 0
         private var LastSearchPriority = 0
+        private var LastFilterPriority = 0
     }
     val formattedName: String
         get() {
@@ -167,6 +170,13 @@ data class DbColumnData(
     fun noSearchPriority() {
         searchPriority.value = 0
     }
+    fun setFilterPriority() {
+        LastFilterPriority++
+        filterPriority.value = LastFilterPriority
+    }
+    fun noFilterPriority() {
+        filterPriority.value = 0
+    }
     enum class Type{
         varchar,
         text,
@@ -178,6 +188,15 @@ data class DbColumnData(
         None,
         AZ,
         ZA
+    }
+    enum class Filter {
+        None,
+        StartsWith,
+        EndsWith,
+        Contains,
+        GreaterThan,
+        LessThen,
+        Equals
     }
 }
 
@@ -211,7 +230,7 @@ fun DbTable(
         //Rows
         val rows = remember {
             derivedStateOf {
-                val searchList = columns.filter {
+                /*val searchList = columns.filter {
                     it.search.value != null
                 }.map {
                     Triple(it.searchPriority.value, it.search.value, it.name)
@@ -224,7 +243,9 @@ fun DbTable(
                     searchedList = searchedList.filter {
                         it.cells[indexOfCell].value == search.second
                     }
-                }
+                }*/
+
+
 
                 val sortList = columns.filter {
                     it.sort.value != DbColumnData.Sort.None
@@ -233,7 +254,7 @@ fun DbTable(
                 }.sortedByDescending {
                     it.first
                 }
-                var sortedList = searchedList
+                var sortedList = tableData.rows
                 for(sort in sortList) {
                     val indexOfCell = columns.indexOfFirst { it.name == sort.third }
                     val isNumeric = columns[indexOfCell].type == DbColumnData.Type.numeric
@@ -408,12 +429,39 @@ fun HeadRow(
                                 column.search.value = null
                                 column.noSearchPriority()
                             }
-                        } else {
+                        }
+                        else if(column.filter.value.second != DbColumnData.Filter.None) {
+                            JustText(
+                                "⌛ " +
+                                        when (column.filter.value.second) {
+                                            DbColumnData.Filter.None -> ""
+                                            DbColumnData.Filter.StartsWith -> column.filter.value.first + " ..."
+                                            DbColumnData.Filter.EndsWith -> "... " + column.filter.value.first
+                                            DbColumnData.Filter.Contains -> "... " + column.filter.value.first + " ..."
+                                            DbColumnData.Filter.GreaterThan -> "> " + column.filter.value.first
+                                            DbColumnData.Filter.LessThen -> "< " + column.filter.value.first
+                                            DbColumnData.Filter.Equals -> "= " + column.filter.value.first
+                                        },
+                                modifier = Modifier.weight(1f)
+                            )
+                            ActionButton(
+                                "X",
+                                Color(0xFFAAAAAA),
+                                modifier = Modifier
+                                    .padding(4.dp)
+                                    .fillMaxHeight()
+                                    .aspectRatio(1f)
+                            ) {
+                                column.filter.value = Pair(null, DbColumnData.Filter.None)
+                                column.noFilterPriority()
+                            }
+                        }
+                        else {
                             ActionButton("Пошук", Color(0xFFAAAAAA), modifier = Modifier.weight(1f)) {
                                 isSearchDialog = true
                             }
                             ActionButton("Фільтр", Color(0xFFAAAAAA), modifier = Modifier.weight(1f)) {
-                                isSearchDialog = true
+                                isFilterDialog = true
                             }
                         }
 
@@ -472,11 +520,87 @@ fun HeadRow(
                                     }
                                 }
                             }
-                        } else if (isFilterDialog) {
+                        }
+                        else if (isFilterDialog) {
                             Dialog(
                                 onDismissRequest = { isFilterDialog = false },
                             ) {
+                                Card {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Text("Введіть значення для фільтрації:")
+                                        var value by remember {
+                                            mutableStateOf(
+                                                if (column.type == DbColumnData.Type.timestamp) DateToString(
+                                                    LocalDateTime.now()
+                                                )
+                                                else if (column.type == DbColumnData.Type.numeric) "0"
+                                                else ""
+                                            )
+                                        }
+                                        var parametr by remember {
+                                            mutableStateOf(
+                                                if (column.type == DbColumnData.Type.timestamp) DateToString(
+                                                    LocalDateTime.now()
+                                                )
+                                                else if (column.type == DbColumnData.Type.numeric) ">"
+                                                else "Starts with: "
+                                            )
+                                        }
+                                        Column {
+                                            if (column.type == DbColumnData.Type.timestamp) {
+                                                MyDateTimePicker(
+                                                    value,
+                                                    { value = DateToString(it) },
+                                                )
+                                            } else {
+                                                Box(
+                                                    Modifier
+                                                        .height(50.dp)
+                                                ) {
+                                                    MyDropDown(
+                                                        if (column.type == DbColumnData.Type.numeric) listOf(">", "<", "=")
+                                                        else listOf("Starts with: ", "Ends with: ", "Contains: "),
+                                                        parametr,
+                                                        { parametr = it },
+                                                    )
+                                                }
+                                                Box(
+                                                    Modifier
+                                                        .height(50.dp)
+                                                ) {
+                                                    MyTextField(
+                                                        value,
+                                                        { value = it },
+                                                        isNumeric = column.type == DbColumnData.Type.numeric,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Button(
+                                            onClick = {
+                                                column.filter.value = Pair(
+                                                    value,
+                                                    when(parametr) {
+                                                        "Starts with: " -> DbColumnData.Filter.StartsWith
+                                                        "Ends with: " -> DbColumnData.Filter.EndsWith
+                                                        "Contains: " -> DbColumnData.Filter.Contains
+                                                        ">" -> DbColumnData.Filter.GreaterThan
+                                                        "<" -> DbColumnData.Filter.LessThen
+                                                        "=" -> DbColumnData.Filter.Equals
+                                                        else -> DbColumnData.Filter.None
+                                                    }
+                                                )
+                                                column.noFilterPriority()
 
+                                                isFilterDialog = false
+                                            }
+                                        ) {
+                                            Text("Підтвердити")
+                                        }
+                                    }
+                                }
                             }
                         }
 
