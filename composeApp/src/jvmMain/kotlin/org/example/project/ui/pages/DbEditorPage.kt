@@ -196,7 +196,10 @@ data class DbColumnData(
         Contains,
         GreaterThan,
         LessThen,
-        Equals
+        Equals,
+        After,
+        Before,
+        InBetween
     }
 }
 
@@ -263,6 +266,14 @@ fun DbTable(
                             DbColumnData.Filter.GreaterThan -> it.cells[indexOfCell].value.toInt() > filter.second.first!!.toInt()
                             DbColumnData.Filter.LessThen -> it.cells[indexOfCell].value.toInt() < filter.second.first!!.toInt()
                             DbColumnData.Filter.Equals -> it.cells[indexOfCell].value == filter.second.first
+                            DbColumnData.Filter.After -> StringToDate(it.cells[indexOfCell].value).isAfter(StringToDate(filter.second.first!!))
+                            DbColumnData.Filter.Before -> StringToDate(it.cells[indexOfCell].value).isBefore(StringToDate(filter.second.first!!))
+                            DbColumnData.Filter.InBetween -> {
+                                val fDate = StringToDate(filter.second.first!!.split('|')[0])
+                                val sDate = StringToDate(filter.second.first!!.split('|')[1])
+                                StringToDate(it.cells[indexOfCell].value).isAfter(fDate) &&
+                                        StringToDate(it.cells[indexOfCell].value).isBefore(sDate)
+                            }
                             else -> false
                         }
                     }
@@ -429,10 +440,10 @@ fun HeadRow(
                 }
                 if(extraFunctions) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier
                             .border(1.dp, Color.Black)
-                            .padding(16.dp, 4.dp)
+                            .padding(4.dp, 4.dp)
                             .weight(1f)
                     ) {
                         var isSearchDialog by remember { mutableStateOf(false) }
@@ -444,7 +455,7 @@ fun HeadRow(
                                 "X",
                                 Color(0xFFAAAAAA),
                                 modifier = Modifier
-                                    .padding(4.dp)
+                                    .padding(0.dp, 4.dp)
                                     .fillMaxHeight()
                                     .aspectRatio(1f)
                             ) {
@@ -463,6 +474,13 @@ fun HeadRow(
                                             DbColumnData.Filter.GreaterThan -> "> " + column.filter.value.first
                                             DbColumnData.Filter.LessThen -> "< " + column.filter.value.first
                                             DbColumnData.Filter.Equals -> "= " + column.filter.value.first
+                                            DbColumnData.Filter.After -> "After " + column.filter.value.first
+                                            DbColumnData.Filter.Before -> "Before " + column.filter.value.first
+                                            DbColumnData.Filter.InBetween ->
+                                                "Between " +
+                                                column.filter.value.first!!.split('|')[0] +
+                                                " and " +
+                                                column.filter.value.first!!.split('|')[1]
                                         },
                                 modifier = Modifier.weight(1f)
                             )
@@ -554,40 +572,65 @@ fun HeadRow(
                                         Text("Введіть значення для фільтрації:")
                                         var value by remember {
                                             mutableStateOf(
-                                                if (column.type == DbColumnData.Type.timestamp) DateToString(
-                                                    LocalDateTime.now()
-                                                )
+                                                if (column.type == DbColumnData.Type.timestamp)
+                                                    DateToString(LocalDateTime.now())
                                                 else if (column.type == DbColumnData.Type.numeric) "0"
                                                 else ""
                                             )
                                         }
                                         var parametr by remember {
                                             mutableStateOf(
-                                                if (column.type == DbColumnData.Type.timestamp) DateToString(
-                                                    LocalDateTime.now()
-                                                )
+                                                if (column.type == DbColumnData.Type.timestamp) "After"
                                                 else if (column.type == DbColumnData.Type.numeric) ">"
                                                 else "Starts with: "
                                             )
                                         }
+                                        var firstDate by remember { mutableStateOf(DateToString(LocalDateTime.now())) }
+                                        var secondDate by remember { mutableStateOf(DateToString(LocalDateTime.now())) }
                                         Column {
-                                            if (column.type == DbColumnData.Type.timestamp) {
-                                                MyDateTimePicker(
-                                                    value,
-                                                    { value = DateToString(it) },
+                                            Box(
+                                                Modifier
+                                                    .height(50.dp)
+                                            ) {
+                                                MyDropDown(
+                                                    if (column.type == DbColumnData.Type.numeric) listOf(">", "<", "=")
+                                                    else if(column.type == DbColumnData.Type.timestamp) listOf("After", "Before", "In Between")
+                                                    else listOf("Starts with: ", "Ends with: ", "Contains: "),
+                                                    parametr,
+                                                    { parametr = it },
                                                 )
-                                            } else {
+                                            }
+                                            if (column.type == DbColumnData.Type.timestamp) {
                                                 Box(
                                                     Modifier
-                                                        .height(50.dp)
+                                                        .height(70.dp)
                                                 ) {
-                                                    MyDropDown(
-                                                        if (column.type == DbColumnData.Type.numeric) listOf(">", "<", "=")
-                                                        else listOf("Starts with: ", "Ends with: ", "Contains: "),
-                                                        parametr,
-                                                        { parametr = it },
+                                                    MyDateTimePicker(
+                                                        firstDate,
+                                                        {
+                                                            firstDate = DateToString(it)
+                                                            if(parametr == "In Between")
+                                                                value = firstDate + "|" + secondDate
+                                                            else
+                                                                value = firstDate
+                                                        },
                                                     )
                                                 }
+                                                if (parametr == "In Between") {
+                                                    Box(
+                                                        Modifier
+                                                            .height(70.dp)
+                                                    ) {
+                                                        MyDateTimePicker(
+                                                            secondDate,
+                                                            {
+                                                                secondDate = DateToString(it)
+                                                                value = firstDate + "|" + secondDate
+                                                            },
+                                                        )
+                                                    }
+                                                }
+                                            } else {
                                                 Box(
                                                     Modifier
                                                         .height(50.dp)
@@ -603,7 +646,8 @@ fun HeadRow(
                                         Button(
                                             onClick = {
                                                 column.filter.value = Pair(
-                                                    value,
+                                                    if(parametr == "In Between") firstDate + "|" + secondDate
+                                                        else value,
                                                     when(parametr) {
                                                         "Starts with: " -> DbColumnData.Filter.StartsWith
                                                         "Ends with: " -> DbColumnData.Filter.EndsWith
@@ -611,6 +655,9 @@ fun HeadRow(
                                                         ">" -> DbColumnData.Filter.GreaterThan
                                                         "<" -> DbColumnData.Filter.LessThen
                                                         "=" -> DbColumnData.Filter.Equals
+                                                        "After" -> DbColumnData.Filter.After
+                                                        "Before" -> DbColumnData.Filter.Before
+                                                        "In Between" -> DbColumnData.Filter.InBetween
                                                         else -> DbColumnData.Filter.None
                                                     }
                                                 )
@@ -839,12 +886,12 @@ fun JustText(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 8.dp, vertical = 0.dp)
+            .padding(horizontal = 4.dp, vertical = 0.dp)
     ) {
         Text(
             text = text,
             textAlign = textAlign,
-            fontSize = 16.sp,
+            fontSize = if(text.length > 30) 10.sp else if(text.length > 25) 12.sp else 16.sp,
             modifier = Modifier
                 .fillMaxWidth()
         )
