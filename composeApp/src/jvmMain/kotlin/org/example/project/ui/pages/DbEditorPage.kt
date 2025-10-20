@@ -245,6 +245,28 @@ fun DbTable(
                     }
                 }*/
 
+                val filterList = columns.filter {
+                    it.filter.value.second != DbColumnData.Filter.None
+                }.map {
+                    Triple(it.filterPriority.value, it.filter.value, it.name)
+                }.sortedByDescending {
+                    it.first
+                }
+                var filteredList = tableData.rows
+                for (filter in filterList) {
+                    val indexOfCell = columns.indexOfFirst { it.name == filter.third }
+                    filteredList = filteredList.filter {
+                        when(filter.second.second) {
+                            DbColumnData.Filter.StartsWith -> it.cells[indexOfCell].value.startsWith(filter.second.first!!)
+                            DbColumnData.Filter.EndsWith -> it.cells[indexOfCell].value.endsWith(filter.second.first!!)
+                            DbColumnData.Filter.Contains -> it.cells[indexOfCell].value.contains(filter.second.first!!)
+                            DbColumnData.Filter.GreaterThan -> it.cells[indexOfCell].value.toInt() > filter.second.first!!.toInt()
+                            DbColumnData.Filter.LessThen -> it.cells[indexOfCell].value.toInt() < filter.second.first!!.toInt()
+                            DbColumnData.Filter.Equals -> it.cells[indexOfCell].value == filter.second.first
+                            else -> false
+                        }
+                    }
+                }
 
 
                 val sortList = columns.filter {
@@ -254,7 +276,7 @@ fun DbTable(
                 }.sortedByDescending {
                     it.first
                 }
-                var sortedList = tableData.rows
+                var sortedList = filteredList
                 for(sort in sortList) {
                     val indexOfCell = columns.indexOfFirst { it.name == sort.third }
                     val isNumeric = columns[indexOfCell].type == DbColumnData.Type.numeric
