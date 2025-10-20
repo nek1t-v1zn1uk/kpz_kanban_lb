@@ -26,7 +26,8 @@ fun main() = application {
                 json(customJson)
             }
         }
-        val dbEditorViewModel = DbEditorViewModel(client, customJson)
+
+        val dbEditorViewModel = DbEditorViewModel(client)
         DbEditorPage(dbEditorViewModel)
     }
 }
