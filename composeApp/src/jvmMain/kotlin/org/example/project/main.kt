@@ -10,6 +10,12 @@ import kotlinx.serialization.json.Json
 import org.example.project.ui.pages.DbEditorPage
 import org.example.project.viewmodels.DbEditorViewModel
 
+val customJson = Json {
+    ignoreUnknownKeys = true
+    isLenient = true
+    encodeDefaults = true
+}
+
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
@@ -17,10 +23,7 @@ fun main() = application {
     ) {
         val client = HttpClient(CIO) {
             install(ContentNegotiation) {
-                json(Json {
-                    ignoreUnknownKeys = true
-                    isLenient = true
-                })
+                json(customJson)
             }
         }
 
