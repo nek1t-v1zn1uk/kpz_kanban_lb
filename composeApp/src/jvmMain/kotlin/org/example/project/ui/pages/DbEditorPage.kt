@@ -1,6 +1,5 @@
 package org.example.project.ui.pages
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,12 +28,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import org.example.project.data.dtos.KanbanBoardDto
 import org.example.project.data.dtos.KanbanColumnDto
 import org.example.project.data.dtos.KanbanTaskDto
@@ -130,18 +131,7 @@ data class DbColumnData(
     var enumOptions: List<String>? = null,
     var primaryKey: Boolean = false,
     var foreignKey: Boolean = false,
-    var sort: MutableState<Sort> = mutableStateOf(Sort.None),
-    var sortPriority: MutableState<Int> = mutableStateOf(0),
-    var search: MutableState<String?> = mutableStateOf(null),
-    var searchPriority: MutableState<Int> = mutableStateOf(0),
-    var filter: MutableState<Pair<String?, Filter>> = mutableStateOf(Pair(null, Filter.None)),
-    var filterPriority: MutableState<Int> = mutableStateOf(0),
 ) {
-    companion object {
-        private var LastSortPriority = 0
-        private var LastSearchPriority = 0
-        private var LastFilterPriority = 0
-    }
     val formattedName: String
         get() {
             var res = ""
@@ -156,50 +146,12 @@ data class DbColumnData(
 
             return res
         }
-    fun setSortPriority() {
-        LastSortPriority++
-        sortPriority.value = LastSortPriority
-    }
-    fun noSortPriority() {
-        sortPriority.value = 0
-    }
-    fun setSearchPriority() {
-        LastSearchPriority++
-        searchPriority.value = LastSearchPriority
-    }
-    fun noSearchPriority() {
-        searchPriority.value = 0
-    }
-    fun setFilterPriority() {
-        LastFilterPriority++
-        filterPriority.value = LastFilterPriority
-    }
-    fun noFilterPriority() {
-        filterPriority.value = 0
-    }
     enum class Type{
         varchar,
         text,
         enum,
         numeric,
         timestamp
-    }
-    enum class Sort {
-        None,
-        AZ,
-        ZA
-    }
-    enum class Filter {
-        None,
-        StartsWith,
-        EndsWith,
-        Contains,
-        GreaterThan,
-        LessThen,
-        Equals,
-        After,
-        Before,
-        InBetween
     }
 }
 
@@ -225,87 +177,8 @@ fun DbTable(
         // Title
         Text(text = title)
         //Header
-        val columns = remember { tableData.columns.toMutableStateList() }
-        HeadRow(
-            columns = columns,
-            extraFunctions = true
-        )
+        HeadRow(columns = tableData.columns)
         //Rows
-        val rows = remember {
-            derivedStateOf {
-                /*val searchList = columns.filter {
-                    it.search.value != null
-                }.map {
-                    Triple(it.searchPriority.value, it.search.value, it.name)
-                }.sortedByDescending {
-                    it.first
-                }
-                var searchedList = tableData.rows
-                for (search in searchList) {
-                    val indexOfCell = columns.indexOfFirst { it.name == search.third }
-                    searchedList = searchedList.filter {
-                        it.cells[indexOfCell].value == search.second
-                    }
-                }*/
-
-                val filterList = columns.filter {
-                    it.filter.value.second != DbColumnData.Filter.None
-                }.map {
-                    Triple(it.filterPriority.value, it.filter.value, it.name)
-                }.sortedByDescending {
-                    it.first
-                }
-                var filteredList = tableData.rows
-                for (filter in filterList) {
-                    val indexOfCell = columns.indexOfFirst { it.name == filter.third }
-                    filteredList = filteredList.filter {
-                        when(filter.second.second) {
-                            DbColumnData.Filter.StartsWith -> it.cells[indexOfCell].value.startsWith(filter.second.first!!)
-                            DbColumnData.Filter.EndsWith -> it.cells[indexOfCell].value.endsWith(filter.second.first!!)
-                            DbColumnData.Filter.Contains -> it.cells[indexOfCell].value.contains(filter.second.first!!)
-                            DbColumnData.Filter.GreaterThan -> it.cells[indexOfCell].value.toInt() > filter.second.first!!.toInt()
-                            DbColumnData.Filter.LessThen -> it.cells[indexOfCell].value.toInt() < filter.second.first!!.toInt()
-                            DbColumnData.Filter.Equals -> it.cells[indexOfCell].value == filter.second.first
-                            DbColumnData.Filter.After -> StringToDate(it.cells[indexOfCell].value).isAfter(StringToDate(filter.second.first!!))
-                            DbColumnData.Filter.Before -> StringToDate(it.cells[indexOfCell].value).isBefore(StringToDate(filter.second.first!!))
-                            DbColumnData.Filter.InBetween -> {
-                                val fDate = StringToDate(filter.second.first!!.split('|')[0])
-                                val sDate = StringToDate(filter.second.first!!.split('|')[1])
-                                StringToDate(it.cells[indexOfCell].value).isAfter(fDate) &&
-                                        StringToDate(it.cells[indexOfCell].value).isBefore(sDate)
-                            }
-                            else -> false
-                        }
-                    }
-                }
-
-
-                val sortList = columns.filter {
-                    it.sort.value != DbColumnData.Sort.None
-                }.map {
-                    Triple(it.sortPriority.value, it.sort.value, it.name)
-                }.sortedByDescending {
-                    it.first
-                }
-                var sortedList = filteredList
-                for(sort in sortList) {
-                    val indexOfCell = columns.indexOfFirst { it.name == sort.third }
-                    val isNumeric = columns[indexOfCell].type == DbColumnData.Type.numeric
-                    sortedList = if(sort.second == DbColumnData.Sort.AZ)
-                        if(isNumeric)
-                            sortedList.sortedBy { it.cells[indexOfCell].value.toInt() }
-                        else
-                            sortedList.sortedBy { it.cells[indexOfCell].value }
-                    else
-                        if(isNumeric)
-                            sortedList.sortedByDescending { it.cells[indexOfCell].value.toInt() }
-                        else
-                            sortedList.sortedByDescending { it.cells[indexOfCell].value }
-                }
-
-                sortedList.toMutableStateList()
-            }
-        }.value
         Column(
             verticalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier
@@ -314,7 +187,7 @@ fun DbTable(
         ) {
             //View Rows
             LazyColumn {
-                itemsIndexed(rows) { index, row ->
+                itemsIndexed(tableData.rows) { index, row ->
                     DbRow(
                         tableData.columns,
                         row.cells,
@@ -344,7 +217,7 @@ fun DbTable(
             val values = remember { resetValues().toMutableStateList() }
             Column {
                 Divider(Modifier.height(16.dp))
-                HeadRow(columns = columns)
+                HeadRow(columns = tableData.columns)
                 RowFields(
                     tableData.columns,
                     values.map { DbCellData("") },
@@ -364,16 +237,13 @@ fun DbTable(
 }
 
 @Composable
-fun HeadRow(
-    columns: SnapshotStateList<DbColumnData>,
-    extraFunctions: Boolean = false,
-){
+fun HeadRow(columns: List<DbColumnData>){
     Row(
         Modifier
-            .heightIn(50.dp, 100.dp)
+            .height(50.dp)
     ) {
         for ((index, column) in columns.withIndex()) {
-            Column(
+            DbCell(
                 Modifier
                     .weight(1f)
                     .background(
@@ -381,300 +251,7 @@ fun HeadRow(
                         else Color(0xFFE7E7E7),
                     )
             ) {
-                DbCell(
-                    Modifier
-                        .weight(1f)
-                ) {
-                    if (extraFunctions) {
-                        Row {
-                            JustText(
-                                column.formattedName, TextAlign.Center,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                            )
-
-                            Button(
-                                contentPadding = PaddingValues(2.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFFBBBBBB),
-                                ),
-                                shape = RoundedCornerShape(5.dp),
-                                border = BorderStroke(1.dp, Color.DarkGray),
-                                onClick = {
-                                    column.sort.value = when (column.sort.value) {
-                                        DbColumnData.Sort.None -> {
-                                            column.setSortPriority()
-                                            DbColumnData.Sort.AZ
-                                        }
-                                        DbColumnData.Sort.AZ -> {
-                                            column.setSortPriority()
-                                            DbColumnData.Sort.ZA
-                                        }
-                                        DbColumnData.Sort.ZA -> {
-                                            column.noSortPriority()
-                                            DbColumnData.Sort.None
-                                        }
-                                    }
-                                },
-                                modifier = Modifier
-                                    .padding(4.dp)
-                                    .fillMaxHeight()
-                                    .aspectRatio(1f)
-                            ) {
-                                Text(
-                                    when (column.sort.value) {
-                                        DbColumnData.Sort.None -> "="
-                                        DbColumnData.Sort.AZ -> "↓"
-                                        DbColumnData.Sort.ZA -> "↑"
-                                    },
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
-                                    color = Color.Black,
-                                )
-                            }
-                        }
-                    } else {
-                        JustText(column.formattedName, TextAlign.Center)
-                    }
-                }
-                if(extraFunctions) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier
-                            .border(1.dp, Color.Black)
-                            .padding(4.dp, 4.dp)
-                            .weight(1f)
-                    ) {
-                        var isSearchDialog by remember { mutableStateOf(false) }
-                        var isFilterDialog by remember { mutableStateOf(false) }
-
-                        if(column.search.value != null) {
-                            JustText("\uD83D\uDD0D ${column.search.value}", modifier = Modifier.weight(1f))
-                            ActionButton(
-                                "X",
-                                Color(0xFFAAAAAA),
-                                modifier = Modifier
-                                    .padding(0.dp, 4.dp)
-                                    .fillMaxHeight()
-                                    .aspectRatio(1f)
-                            ) {
-                                column.search.value = null
-                                column.noSearchPriority()
-                            }
-                        }
-                        else if(column.filter.value.second != DbColumnData.Filter.None) {
-                            JustText(
-                                "⌛ " +
-                                        when (column.filter.value.second) {
-                                            DbColumnData.Filter.None -> ""
-                                            DbColumnData.Filter.StartsWith -> column.filter.value.first + " ..."
-                                            DbColumnData.Filter.EndsWith -> "... " + column.filter.value.first
-                                            DbColumnData.Filter.Contains -> "... " + column.filter.value.first + " ..."
-                                            DbColumnData.Filter.GreaterThan -> "> " + column.filter.value.first
-                                            DbColumnData.Filter.LessThen -> "< " + column.filter.value.first
-                                            DbColumnData.Filter.Equals -> "= " + column.filter.value.first
-                                            DbColumnData.Filter.After -> "After " + column.filter.value.first
-                                            DbColumnData.Filter.Before -> "Before " + column.filter.value.first
-                                            DbColumnData.Filter.InBetween ->
-                                                "Between " +
-                                                column.filter.value.first!!.split('|')[0] +
-                                                " and " +
-                                                column.filter.value.first!!.split('|')[1]
-                                        },
-                                modifier = Modifier.weight(1f)
-                            )
-                            ActionButton(
-                                "X",
-                                Color(0xFFAAAAAA),
-                                modifier = Modifier
-                                    .padding(4.dp)
-                                    .fillMaxHeight()
-                                    .aspectRatio(1f)
-                            ) {
-                                column.filter.value = Pair(null, DbColumnData.Filter.None)
-                                column.noFilterPriority()
-                            }
-                        }
-                        else {
-                            ActionButton("Пошук", Color(0xFFAAAAAA), modifier = Modifier.weight(1f)) {
-                                isSearchDialog = true
-                            }
-                            ActionButton("Фільтр", Color(0xFFAAAAAA), modifier = Modifier.weight(1f)) {
-                                isFilterDialog = true
-                            }
-                        }
-
-                        if (isSearchDialog) {
-                            Dialog(
-                                onDismissRequest = { isSearchDialog = false },
-                            ) {
-                                Card {
-                                    Column(
-                                        modifier = Modifier.padding(16.dp)
-                                    ) {
-                                        Text("Введіть значення для пошуку:")
-                                        var value by remember {
-                                            mutableStateOf(
-                                                if (column.type == DbColumnData.Type.timestamp) DateToString(
-                                                    LocalDateTime.now()
-                                                )
-                                                else if (column.foreignKey || column.type == DbColumnData.Type.enum) column.enumOptions?.let { it[0] }
-                                                    ?: "None"
-                                                else ""
-                                            )
-                                        }
-                                        Box(
-                                            Modifier
-                                                .height(50.dp)
-                                        ) {
-                                            if (column.type == DbColumnData.Type.timestamp) {
-                                                MyDateTimePicker(
-                                                    value,
-                                                    { value = DateToString(it) },
-                                                )
-                                            } else if (column.foreignKey || column.type == DbColumnData.Type.enum) {
-                                                MyDropDown(
-                                                    column.enumOptions!!,
-                                                    value,
-                                                    { value = it }
-                                                )
-                                            } else {
-                                                MyTextField(
-                                                    value,
-                                                    { value = it },
-                                                    isNumeric = column.type == DbColumnData.Type.numeric,
-                                                )
-                                            }
-                                        }
-                                        Button(
-                                            onClick = {
-                                                column.search.value = value
-                                                column.setSearchPriority()
-
-                                                isSearchDialog = false
-                                            }
-                                        ) {
-                                            Text("Підтвердити")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        else if (isFilterDialog) {
-                            Dialog(
-                                onDismissRequest = { isFilterDialog = false },
-                            ) {
-                                Card {
-                                    Column(
-                                        modifier = Modifier.padding(16.dp)
-                                    ) {
-                                        Text("Введіть значення для фільтрації:")
-                                        var value by remember {
-                                            mutableStateOf(
-                                                if (column.type == DbColumnData.Type.timestamp)
-                                                    DateToString(LocalDateTime.now())
-                                                else if (column.type == DbColumnData.Type.numeric) "0"
-                                                else ""
-                                            )
-                                        }
-                                        var parametr by remember {
-                                            mutableStateOf(
-                                                if (column.type == DbColumnData.Type.timestamp) "After"
-                                                else if (column.type == DbColumnData.Type.numeric) ">"
-                                                else "Starts with: "
-                                            )
-                                        }
-                                        var firstDate by remember { mutableStateOf(DateToString(LocalDateTime.now())) }
-                                        var secondDate by remember { mutableStateOf(DateToString(LocalDateTime.now())) }
-                                        Column {
-                                            Box(
-                                                Modifier
-                                                    .height(50.dp)
-                                            ) {
-                                                MyDropDown(
-                                                    if (column.type == DbColumnData.Type.numeric) listOf(">", "<", "=")
-                                                    else if(column.type == DbColumnData.Type.timestamp) listOf("After", "Before", "In Between")
-                                                    else listOf("Starts with: ", "Ends with: ", "Contains: "),
-                                                    parametr,
-                                                    { parametr = it },
-                                                )
-                                            }
-                                            if (column.type == DbColumnData.Type.timestamp) {
-                                                Box(
-                                                    Modifier
-                                                        .height(70.dp)
-                                                ) {
-                                                    MyDateTimePicker(
-                                                        firstDate,
-                                                        {
-                                                            firstDate = DateToString(it)
-                                                            if(parametr == "In Between")
-                                                                value = firstDate + "|" + secondDate
-                                                            else
-                                                                value = firstDate
-                                                        },
-                                                    )
-                                                }
-                                                if (parametr == "In Between") {
-                                                    Box(
-                                                        Modifier
-                                                            .height(70.dp)
-                                                    ) {
-                                                        MyDateTimePicker(
-                                                            secondDate,
-                                                            {
-                                                                secondDate = DateToString(it)
-                                                                value = firstDate + "|" + secondDate
-                                                            },
-                                                        )
-                                                    }
-                                                }
-                                            } else {
-                                                Box(
-                                                    Modifier
-                                                        .height(50.dp)
-                                                ) {
-                                                    MyTextField(
-                                                        value,
-                                                        { value = it },
-                                                        isNumeric = column.type == DbColumnData.Type.numeric,
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        Button(
-                                            onClick = {
-                                                column.filter.value = Pair(
-                                                    if(parametr == "In Between") firstDate + "|" + secondDate
-                                                        else value,
-                                                    when(parametr) {
-                                                        "Starts with: " -> DbColumnData.Filter.StartsWith
-                                                        "Ends with: " -> DbColumnData.Filter.EndsWith
-                                                        "Contains: " -> DbColumnData.Filter.Contains
-                                                        ">" -> DbColumnData.Filter.GreaterThan
-                                                        "<" -> DbColumnData.Filter.LessThen
-                                                        "=" -> DbColumnData.Filter.Equals
-                                                        "After" -> DbColumnData.Filter.After
-                                                        "Before" -> DbColumnData.Filter.Before
-                                                        "In Between" -> DbColumnData.Filter.InBetween
-                                                        else -> DbColumnData.Filter.None
-                                                    }
-                                                )
-                                                column.noFilterPriority()
-
-                                                isFilterDialog = false
-                                            }
-                                        ) {
-                                            Text("Підтвердити")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                    }
-                }
+                JustText(column.formattedName, TextAlign.Center)
             }
         }
         DbCell(
@@ -879,19 +456,18 @@ fun DbCell(
 @Composable
 fun JustText(
     text: String,
-    textAlign: TextAlign = TextAlign.Left,
-    modifier: Modifier = Modifier.fillMaxSize()
+    textAlign: TextAlign = TextAlign.Left
 ) {
     Box(
         contentAlignment = Alignment.Center,
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 4.dp, vertical = 0.dp)
+            .padding(horizontal = 8.dp, vertical = 0.dp)
     ) {
         Text(
             text = text,
             textAlign = textAlign,
-            fontSize = if(text.length > 30) 10.sp else if(text.length > 25) 12.sp else 16.sp,
+            fontSize = 16.sp,
             modifier = Modifier
                 .fillMaxWidth()
         )
@@ -962,7 +538,7 @@ fun MyDropDown(
     options: List<String>,
     value: String,
     onValueChange: (String) -> Unit
-) {
+){
     var isExpanded by remember { mutableStateOf(false) }
 
     Column(

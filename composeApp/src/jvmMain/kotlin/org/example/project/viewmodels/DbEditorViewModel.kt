@@ -19,14 +19,25 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.util.reflect.typeInfo
 import kotlinx.coroutines.launch
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.double
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.serializer
 import org.example.project.data.dtos.KanbanBoardDto
 import org.example.project.data.dtos.KanbanColumnDto
 import org.example.project.data.dtos.KanbanTaskDto
 import org.example.project.data.dtos.ProjectDto
 import org.example.project.data.dtos.ProjectMemberDto
+import kotlin.reflect.KClass
+import kotlin.reflect.full.starProjectedType
 
 class DbEditorViewModel(
     private val client: HttpClient,
+    private val jsonSerializer: Json,
     private val baseUrl: String = "http://localhost:8082",
 ) : ViewModel() {
 
@@ -45,16 +56,173 @@ class DbEditorViewModel(
     }
 
 
+    fun resort(table: String, sortAZ: List<Pair<String, Boolean>>, searchList: List<Pair<String, String>>) {
+        viewModelScope.launch {
+            getAllUsers()
+            getAllProjects()
+            getAllProjectMembers()
+            getAllKanbanBoards()
+            getAllKanbanColumns()
+            getAllKanbanTasks()
+
+            val DTO_CLASSES: Map<String, KClass<*>> = mapOf(
+                "users" to UserDto::class,
+                "projects" to ProjectDto::class,
+                "project_members" to ProjectMemberDto::class,
+                "boards" to KanbanBoardDto::class,
+                "columns" to KanbanColumnDto::class,
+                "tasks" to KanbanTaskDto::class,
+            )
+            val kClass: KClass<*> = DTO_CLASSES[table] ?: throw IllegalArgumentException("Unknown table type")
+            val listToSort = when (table) {
+                "users" -> {
+                    _users.value
+                }
+
+                "projects" -> {
+                    _projects.value
+                }
+
+                "project_members" -> {
+                    _projectMembers.value
+                }
+
+                "boards" -> {
+                    _kanbanBoards.value
+                }
+
+                "columns" -> {
+                    _kanbanColumns.value
+                }
+
+                "tasks" -> {
+                    _kanbanTasks.value
+                }
+
+                else -> {
+                    emptyList()
+                }
+            }
+
+            val serializer = jsonSerializer.serializersModule.serializer(kClass.starProjectedType)
+            val jsonStrings = listToSort.map {
+                jsonSerializer.encodeToString(serializer, it)
+            }
+            val listOfMaps = jsonStrings.map {
+                val jsonObject = jsonSerializer.decodeFromString<JsonObject>(it)
+                jsonObject.toMap()
+            }
+
+            var finalListOfMaps = listOfMaps
+
+            if (searchList.isNotEmpty()) {
+                var searchedListOfMaps: List<Map<String, JsonElement>> = finalListOfMaps
+                for (search in searchList) {
+                    searchedListOfMaps = searchedListOfMaps.filter { it[search.first]!!.jsonPrimitive.content == search.second }
+                }
+                finalListOfMaps = searchedListOfMaps
+            }
+
+            if (sortAZ.isNotEmpty()) {
+                fun JsonElement.toComparable(): Comparable<*>? {
+                    return when (this) {
+                        is JsonPrimitive -> {
+                            if (this.isString) {
+                                this.content
+                            } else {
+                                this.double
+                            }
+                        }
+
+                        else -> null
+                    }
+                }
+
+                val firstSort = sortAZ.first()
+                var comparator: Comparator<Map<String, JsonElement>> = if (firstSort.second) {
+                    compareBy { map: Map<String, JsonElement> ->
+                        map[firstSort.first]?.toComparable()
+                    }
+                } else {
+                    compareByDescending { map: Map<String, JsonElement> ->
+                        map[firstSort.first]?.toComparable()
+                    }
+                }
+
+                for (i in 1 until sortAZ.size) {
+                    val (fieldName, isAscending) = sortAZ[i]
+
+                    val nextComparator = if (isAscending) {
+                        compareBy { map: Map<String, JsonElement> ->
+                            map[fieldName]?.toComparable()
+                        }
+                    } else {
+                        compareByDescending { map: Map<String, JsonElement> ->
+                            map[fieldName]?.toComparable()
+                        }
+                    }
+
+                    comparator = comparator.then(nextComparator)
+                }
+
+                finalListOfMaps = finalListOfMaps.sortedWith(comparator)
+            }
+
+            when (table) {
+                "users" -> {
+                    _users.value = finalListOfMaps.map {
+                        val jsonString = jsonSerializer.encodeToString(it)
+                        jsonSerializer.decodeFromString<UserDto>(jsonString)
+                    }
+                }
+
+                "projects" -> {
+                    _projects.value = finalListOfMaps.map {
+                        val jsonString = jsonSerializer.encodeToString(it)
+                        jsonSerializer.decodeFromString<ProjectDto>(jsonString)
+                    }
+                }
+
+                "project_members" -> {
+                    _projectMembers.value = finalListOfMaps.map {
+                        val jsonString = jsonSerializer.encodeToString(it)
+                        jsonSerializer.decodeFromString<ProjectMemberDto>(jsonString)
+                    }
+                }
+
+                "boards" -> {
+                    _kanbanBoards.value = finalListOfMaps.map {
+                        val jsonString = jsonSerializer.encodeToString(it)
+                        jsonSerializer.decodeFromString<KanbanBoardDto>(jsonString)
+                    }
+                }
+
+                "columns" -> {
+                    _kanbanColumns.value = finalListOfMaps.map {
+                        val jsonString = jsonSerializer.encodeToString(it)
+                        jsonSerializer.decodeFromString<KanbanColumnDto>(jsonString)
+                    }
+                }
+
+                "tasks" -> {
+                    _kanbanTasks.value = finalListOfMaps.map {
+                        val jsonString = jsonSerializer.encodeToString(it)
+                        jsonSerializer.decodeFromString<KanbanTaskDto>(jsonString)
+                    }
+                }
+            }
+        }
+    }
+
+
     private val _users = mutableStateOf<List<UserDto>>(emptyList())
     val users: State<List<UserDto>> = _users
 
-    fun getAllUsers() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            val response = client.get("$baseUrl/api/user")
-            _users.value = response.body(typeInfo<List<UserDto>>())
-            _isLoading.value = false
-        }
+    suspend fun getAllUsers() {
+        _isLoading.value = true
+        val response = client.get("$baseUrl/api/user")
+        _users.value = response.body(typeInfo<List<UserDto>>())
+        _isLoading.value = false
     }
     fun addUser(userDto: UserDto) {
         viewModelScope.launch {
@@ -103,13 +271,11 @@ class DbEditorViewModel(
     private val _projects = mutableStateOf<List<ProjectDto>>(emptyList())
     val projects: State<List<ProjectDto>> = _projects
 
-    fun getAllProjects() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            val response = client.get("$baseUrl/api/project")
-            _projects.value = response.body(typeInfo<List<ProjectDto>>())
-            _isLoading.value = false
-        }
+    suspend fun getAllProjects() {
+        _isLoading.value = true
+        val response = client.get("$baseUrl/api/project")
+        _projects.value = response.body(typeInfo<List<ProjectDto>>())
+        _isLoading.value = false
     }
     fun addProject(projectDto: ProjectDto) {
         viewModelScope.launch {
@@ -158,13 +324,11 @@ class DbEditorViewModel(
     private val _projectMembers = mutableStateOf<List<ProjectMemberDto>>(emptyList())
     val projectMembers: State<List<ProjectMemberDto>> = _projectMembers
 
-    fun getAllProjectMembers() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            val response = client.get("$baseUrl/api/project-member")
-            _projectMembers.value = response.body(typeInfo<List<ProjectMemberDto>>())
-            _isLoading.value = false
-        }
+    suspend fun getAllProjectMembers() {
+        _isLoading.value = true
+        val response = client.get("$baseUrl/api/project-member")
+        _projectMembers.value = response.body(typeInfo<List<ProjectMemberDto>>())
+        _isLoading.value = false
     }
     fun addProjectMember(projectMemberDto: ProjectMemberDto) {
         viewModelScope.launch {
@@ -213,13 +377,11 @@ class DbEditorViewModel(
     private val _kanbanBoards = mutableStateOf<List<KanbanBoardDto>>(emptyList())
     val kanbanBoards: State<List<KanbanBoardDto>> = _kanbanBoards
 
-    fun getAllKanbanBoards() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            val response = client.get("$baseUrl/api/kanban-board")
-            _kanbanBoards.value = response.body(typeInfo<List<KanbanBoardDto>>())
-            _isLoading.value = false
-        }
+    suspend fun getAllKanbanBoards() {
+        _isLoading.value = true
+        val response = client.get("$baseUrl/api/kanban-board")
+        _kanbanBoards.value = response.body(typeInfo<List<KanbanBoardDto>>())
+        _isLoading.value = false
     }
     fun addKanbanBoard(kanbanBoardDto: KanbanBoardDto) {
         viewModelScope.launch {
@@ -268,13 +430,11 @@ class DbEditorViewModel(
     private val _kanbanColumns = mutableStateOf<List<KanbanColumnDto>>(emptyList())
     val kanbanColumns: State<List<KanbanColumnDto>> = _kanbanColumns
 
-    fun getAllKanbanColumns() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            val response = client.get("$baseUrl/api/kanban-column")
-            _kanbanColumns.value = response.body(typeInfo<List<KanbanColumnDto>>())
-            _isLoading.value = false
-        }
+    suspend fun getAllKanbanColumns() {
+        _isLoading.value = true
+        val response = client.get("$baseUrl/api/kanban-column")
+        _kanbanColumns.value = response.body(typeInfo<List<KanbanColumnDto>>())
+        _isLoading.value = false
     }
     fun addKanbanColumn(kanbanColumnDto: KanbanColumnDto) {
         viewModelScope.launch {
@@ -323,13 +483,11 @@ class DbEditorViewModel(
     private val _kanbanTasks = mutableStateOf<List<KanbanTaskDto>>(emptyList())
     val kanbanTasks: State<List<KanbanTaskDto>> = _kanbanTasks
 
-    fun getAllKanbanTasks() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            val response = client.get("$baseUrl/api/kanban-task")
-            _kanbanTasks.value = response.body(typeInfo<List<KanbanTaskDto>>())
-            _isLoading.value = false
-        }
+    suspend fun getAllKanbanTasks() {
+        _isLoading.value = true
+        val response = client.get("$baseUrl/api/kanban-task")
+        _kanbanTasks.value = response.body(typeInfo<List<KanbanTaskDto>>())
+        _isLoading.value = false
     }
     fun addKanbanTask(kanbanTaskDto: KanbanTaskDto) {
         viewModelScope.launch {
